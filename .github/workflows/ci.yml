@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }} / ${{ matrix.preset }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        preset: [Release, ASAN]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The project vendors its FFT and needs nothing else to build. Keeping it
+      # that way is deliberate: this job is the only thing that actually proves
+      # the install recipe in the README works, rather than leaving it as an
+      # untested assumption.
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.preset }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  docs-coverage:
+    name: documentation coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      # Every function in src/ and tools/ must carry the block comment required
+      # by section 3a of the implementation plan. Enforced from the first commit
+      # rather than left as a cleanup task before publication.
+      - name: Check function documentation
+        run: python3 scripts/check_docs.py src tools

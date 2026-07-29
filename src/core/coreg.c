@@ -1,0 +1,250 @@
+/* Two-dimensional normalised cross-correlation with sub-pixel refinement.
+ *
+ * This is the measurement primitive of the whole pipeline: everything the
+ * micro-motion stage reports rests on locating a correlation peak to a small
+ * fraction of a pixel. */
+
+#include "resonarsat/coreg.h"
+#include "resonarsat/fft.h"
+
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Copy a patch out of an image, subtracting its mean.
+ *
+ * Mean removal is what makes the subsequent correlation a covariance rather
+ * than a raw inner product, so that a uniform brightness offset between two
+ * looks does not bias the peak. Patches partly outside the image are rejected
+ * by the caller, so no bounds handling is needed here. */
+static void rs_extract_patch(const rs_slc_t *img, size_t az0, size_t rg0,
+                             size_t n_az, size_t n_rg, float complex *patch)
+{
+    float complex sum = 0.0f;
+    for (size_t a = 0; a < n_az; a++) {
+        for (size_t r = 0; r < n_rg; r++) {
+            const float complex v = img->data[(az0 + a) * img->n_rg + (rg0 + r)];
+            patch[a * n_rg + r] = v;
+            sum += v;
+        }
+    }
+    const float complex mean = sum / (float)(n_az * n_rg);
+    for (size_t i = 0; i < n_az * n_rg; i++) patch[i] -= mean;
+}
+
+/* Fill 'out[k] = exp(i * tau * f_k)', with f_k the SIGNED frequency index of
+ * bin k -- bins above Nyquist represent negative frequencies.
+ *
+ * This is half of the separation described on rs_correlation_at(). */
+static void rs_phase_ramp(double tau, size_t n, double complex *out)
+{
+    for (size_t k = 0; k < n; k++) {
+        const double f = (k < n / 2) ? (double)k : (double)k - (double)n;
+        const double p = tau * f;
+        out[k] = cos(p) + I * sin(p);
+    }
+}
+
+/* Evaluate the cross-correlation surface at one fractional offset, by direct
+ * summation of the cross-spectrum against a complex exponential.
+ *
+ * This is the Guizar-Sicairos refinement in its essential form: instead of
+ * upsampling the entire correlation surface by a large factor, evaluate the
+ * inverse transform only at the handful of fractional offsets near the coarse
+ * peak. The cost is O(N) per evaluated point rather than O(N log N) for a whole
+ * upsampled surface, and only a few dozen points are ever needed.
+ *
+ * THE PHASE IS SEPARABLE, WHICH IS WHY NO TRIGONOMETRY HAPPENS HERE. The
+ * exponent is tau_az*f_a + tau_rg*f_r, linear in each index independently, so
+ *
+ *     exp(i*(tau_az*f_a + tau_rg*f_r)) = exp(i*tau_az*f_a) * exp(i*tau_rg*f_r)
+ *
+ * and the double loop is an outer product of two one-dimensional ramps. Written
+ * directly it evaluated cos and sin at all n_az*n_rg inner points -- 576 for a
+ * 24x24 patch -- where n_az + n_rg = 48 suffice. That mattered: a sample(1)
+ * profile of the test suite attributed 88 percent of the whole process to
+ * __sincos_stret underneath this function, which is the pipeline's innermost
+ * loop and runs (2*upsample_az+1)*(2*upsample_rg+1) times per patch per look.
+ *
+ * The identity is exact, so this is not an approximation and no result changes
+ * beyond floating-point reassociation. The caller supplies the two ramps, which
+ * lets it hoist them out of the refinement grid entirely -- see
+ * rs_coreg_shift(), where each is built once per grid LINE rather than once per
+ * grid POINT.
+ *
+ * 'cross' is the cross-spectrum F(a) * conj(F(b)) in unshifted FFT order; 'ea'
+ * and 'er' are the azimuth and range ramps from rs_phase_ramp(), of n_az and
+ * n_rg elements. */
+static double rs_correlation_at(const float complex *cross, size_t n_az, size_t n_rg,
+                                const double complex *ea, const double complex *er)
+{
+    double complex acc = 0.0;
+
+    for (size_t a = 0; a < n_az; a++) {
+        const float complex *row = cross + a * n_rg;
+        double complex s = 0.0;
+        for (size_t r = 0; r < n_rg; r++) {
+            s += (double complex)row[r] * er[r];
+        }
+        acc += s * ea[a];
+    }
+    return cabs(acc);
+}
+
+/* Locate the shift between two equally sized patches.
+ *
+ * Forms the cross-spectrum, inverse transforms it to get the correlation
+ * surface, finds the integer peak, then refines to sub-pixel precision by
+ * evaluating the surface on a fine grid around that peak. The refinement grid
+ * is +/- 1 pixel at 1/upsample resolution, which is where the true peak must
+ * lie once the integer peak is known.
+ *
+ * The returned 'peak' is the normalised correlation coefficient at the refined
+ * location, in [0, 1]; it is the quality metric that masks unreliable windows.
+ *
+ * Returns RS_ERR_ALLOC on memory failure. Degenerate patches (either one having
+ * no variance) yield a peak of zero and a shift of zero rather than a division
+ * by zero. */
+resonarsat_status_t rs_coreg_shift(const float complex *ref, const float complex *img,
+                                   size_t n_az, size_t n_rg,
+                                   size_t upsample_az, size_t upsample_rg,
+                                   double *shift_az, double *shift_rg, double *peak)
+{
+    if (!ref || !img || !shift_az || !shift_rg || !peak) return RS_ERR_ARG;
+    if (n_az == 0 || n_rg == 0) return RS_ERR_ARG;
+    if (upsample_az == 0) upsample_az = 1;
+    if (upsample_rg == 0) upsample_rg = 1;
+
+    const size_t n = n_az * n_rg;
+    float complex *fa = malloc(n * sizeof *fa);
+    float complex *fb = malloc(n * sizeof *fb);
+    float complex *cross = malloc(n * sizeof *cross);
+    /* Declared here, before the first goto, so the single cleanup path can free
+     * them unconditionally. */
+    double complex *ea_tab = NULL, *er_tab = NULL;
+    if (!fa || !fb || !cross) { free(fa); free(fb); free(cross); return RS_ERR_ALLOC; }
+
+    memcpy(fa, ref, n * sizeof *fa);
+    memcpy(fb, img, n * sizeof *fb);
+
+    resonarsat_status_t st;
+    if ((st = rs_fft2(fa, n_az, n_rg, 0)) != RS_OK) goto done;
+    if ((st = rs_fft2(fb, n_az, n_rg, 0)) != RS_OK) goto done;
+
+    /* Energy for normalisation, computed in the frequency domain via
+     * Parseval so no extra pass over the patches is needed.
+     *
+     * The order of the cross-spectrum sets the sign of the reported shift and
+     * is easy to get backwards. If img(x) = ref(x - s), then F_img = F_ref *
+     * exp(-j*2*pi*f*s), so conj(F_ref) * F_img = |F|^2 * exp(-j*2*pi*f*s),
+     * whose inverse transform peaks at +s. Taking the factors the other way
+     * round yields a peak at -s: a tracker that reports every displacement
+     * with the wrong sign, which still produces plausible-looking vibration
+     * spectra because a sign flip is invisible in a power spectrum. */
+    double ea = 0.0, eb = 0.0;
+    for (size_t i = 0; i < n; i++) {
+        const double ma = (double)cabsf(fa[i]), mb = (double)cabsf(fb[i]);
+        ea += ma * ma;
+        eb += mb * mb;
+        cross[i] = conjf(fa[i]) * fb[i];
+    }
+
+    const double norm = sqrt(ea * eb);
+    if (!(norm > 0.0)) {
+        *shift_az = *shift_rg = 0.0;
+        *peak = 0.0;
+        st = RS_OK;
+        goto done;
+    }
+
+    /* Coarse peak from the full correlation surface. */
+    memcpy(fa, cross, n * sizeof *fa);
+    if ((st = rs_fft2(fa, n_az, n_rg, 1)) != RS_OK) goto done;
+
+    size_t best = 0;
+    double best_mag = -1.0;
+    for (size_t i = 0; i < n; i++) {
+        const double m = (double)cabsf(fa[i]);
+        if (m > best_mag) { best_mag = m; best = i; }
+    }
+
+    /* Unwrap the integer peak index into a signed shift. A peak in the upper
+     * half of either axis means a negative shift. */
+    double coarse_az = (double)(best / n_rg);
+    double coarse_rg = (double)(best % n_rg);
+    if (coarse_az > (double)n_az / 2.0) coarse_az -= (double)n_az;
+    if (coarse_rg > (double)n_rg / 2.0) coarse_rg -= (double)n_rg;
+
+    /* Refine on a fine grid spanning +/- 1 pixel about the coarse peak. */
+    double ref_az = coarse_az, ref_rg = coarse_rg, ref_mag = best_mag;
+    const double step_az = 1.0 / (double)upsample_az;
+    const double step_rg = 1.0 / (double)upsample_rg;
+
+    /* Build every phase ramp the grid needs, once.
+     *
+     * The azimuth ramp depends only on the row of the search grid and the range
+     * ramp only on its column, so the grid needs n_ia + n_ir ramps rather than
+     * n_ia * n_ir of them. Combined with the separation inside
+     * rs_correlation_at(), the trigonometry for a 24x24 patch at 40x20
+     * upsampling falls from about 1.9 million evaluations to under three
+     * thousand, and what remains in the inner loop is multiply-accumulate.
+     *
+     * The tables are small -- (n_ia*n_az + n_ir*n_rg) complex doubles, tens of
+     * kilobytes at the sizes this is called with -- and are allocated per call
+     * because rs_coreg_shift() is already called once per patch per look. */
+    const size_t n_ia = 2 * upsample_az + 1;
+    const size_t n_ir = 2 * upsample_rg + 1;
+    ea_tab = malloc(n_ia * n_az * sizeof *ea_tab);
+    er_tab = malloc(n_ir * n_rg * sizeof *er_tab);
+    if (!ea_tab || !er_tab) { st = RS_ERR_ALLOC; goto done; }
+
+    for (size_t i = 0; i < n_ia; i++) {
+        const double ta = coarse_az + ((double)i - (double)upsample_az) * step_az;
+        rs_phase_ramp(2.0 * M_PI * ta / (double)n_az, n_az, ea_tab + i * n_az);
+    }
+    for (size_t j = 0; j < n_ir; j++) {
+        const double tr = coarse_rg + ((double)j - (double)upsample_rg) * step_rg;
+        rs_phase_ramp(2.0 * M_PI * tr / (double)n_rg, n_rg, er_tab + j * n_rg);
+    }
+
+    /* Ascending in both axes, matching the original loop over
+     * ia = -upsample_az .. +upsample_az. The order is not incidental: ties are
+     * resolved by strict '>' and therefore keep the FIRST maximum, so visiting
+     * the grid in another order would move the reported shift on a flat peak. */
+    for (size_t i = 0; i < n_ia; i++) {
+        const double ta = coarse_az + ((double)i - (double)upsample_az) * step_az;
+        for (size_t j = 0; j < n_ir; j++) {
+            const double tr = coarse_rg + ((double)j - (double)upsample_rg) * step_rg;
+            const double m = rs_correlation_at(cross, n_az, n_rg,
+                                               ea_tab + i * n_az, er_tab + j * n_rg);
+            if (m > ref_mag) { ref_mag = m; ref_az = ta; ref_rg = tr; }
+        }
+    }
+
+    *shift_az = ref_az;
+    *shift_rg = ref_rg;
+    /* The inverse transform carries a 1/n normalisation the direct evaluation
+     * does not, so scale the direct result before comparing with the energy. */
+    *peak = (ref_mag / (double)n) / norm * (double)n;
+    if (*peak > 1.0) *peak = 1.0;
+    st = RS_OK;
+
+done:
+    free(fa); free(fb); free(cross); free(ea_tab); free(er_tab);
+    return st;
+}
+
+/* Extract a patch from an image with the mean removed. Thin wrapper so callers
+ * outside this file need not know the layout convention. */
+resonarsat_status_t rs_coreg_extract(const rs_slc_t *img, size_t az0, size_t rg0,
+                                     size_t n_az, size_t n_rg, float complex *patch)
+{
+    if (!img || !patch || !img->data) return RS_ERR_ARG;
+    if (az0 + n_az > img->n_az || rg0 + n_rg > img->n_rg) {
+        rs_set_error("coreg: patch at (%zu,%zu) size %zux%zu exceeds image %zux%zu",
+                     az0, rg0, n_az, n_rg, img->n_az, img->n_rg);
+        return RS_ERR_ARG;
+    }
+    rs_extract_patch(img, az0, rg0, n_az, n_rg, patch);
+    return RS_OK;
+}

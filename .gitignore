@@ -1,0 +1,57 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+
+# Downloaded SAR scenes and derived products. These are large (tens to hundreds
+# of GB) and must never enter git. The directory itself IS tracked, through its
+# README: a clone that lacks data/ gives a confusing failure on the first run,
+# and the README is now the only tracked record of where the collects come from
+# and how to verify one downloaded intact.
+data/*
+!data/README.md
+*.slc
+*.cphd
+*.SAFE/
+*.h5
+*.tif
+*.tiff
+*.pgm
+
+# Intermediate products
+out/
+*.rsprod
+
+# Editor / OS
+.DS_Store
+*.swp
+.vscode/
+.idea/
+compile_commands.json
+.cache/
+
+
+docs/IMPLEMENTATION_PLAN.md
+
+# docs/ is a working area. Only the project's own prose belongs in the
+# repository; everything else -- development notes, review transcripts, dataset
+# scratch, plans -- is local.
+#
+# The source papers and the patent are deliberately NOT tracked. They are third-
+# party publications, and redistributing them here would mean asserting a
+# licence for each one that this project is not in a position to assert. Cite
+# them by DOI and publication number instead; a reader can fetch them from the
+# publisher. Keeping local copies in docs/ is expected, and is why *.pdf is
+# ignored rather than merely untracked.
+docs/*
+*.pdf
+!docs/ARCHITECTURE.md
+!docs/USER-GUIDE.md
+!docs/DATASETS.md
+!docs/IMPLEMENTATION-VERIFICATION.md
+!docs/OPEN-QUESTIONS.md
+!docs/CORE-QUESTIONS.md
+
+# Synthetic fixtures written into the working tree by the simulator tools.
+sim.cphd.truth
+sim.cphd
