@@ -368,6 +368,170 @@ int main(void)
         RS_CHECK(fabs(got[1] - got[0]) > 0.2);
     }
 
+    /* --no-optimize through the whole tracking stage.
+     *
+     * The question this answers is not "is the baseline correct" -- test_coreg.c
+     * does that on the primitive -- but "does routing a real chain through it
+     * change the measurement". If the two modes disagreed wildly on a clean
+     * synthetic scene, one of them would be wrong. If they agreed to the bit, the
+     * exhaustive search would be pointless. What is expected, and asserted, is
+     * that they agree on nearly every window and may differ on a few: the local
+     * path's integer peak is already global, so a difference requires the
+     * continuous crest to lie more than a pixel from the strongest sample, which
+     * needs competing lobes.
+     *
+     * The window count is kept small and the look count low deliberately, though
+     * less than one might think is needed: the exhaustive path measures 1.7x to
+     * 3.2x the optimised one per call, not the orders of magnitude the mechanism
+     * suggests. See rs_microm_params_t.no_optimize for why. */
+    RS_CASE("--no-optimize tracking agrees with the optimised path per window");
+    {
+        const rs_sim_tgt_t tg[] = {
+            { .x = 0.0, .y = 0.0, .z = 0.0, .rcs = 1.0,
+              .vib_freq = 0.4, .vib_amp = amp },
+            { .x = -12.0, .y = 6.0, .z = 0.0, .rcs = 0.8 },
+        };
+
+        rs_cphd_t c;
+        RS_CHECK_OK(rs_sim_scene(&c, tg, 2, 20.0, 400.0, 256, 0.5));
+
+        rs_grid_t g = { .origin = {0,0,0}, .n_x = 48, .n_y = 48,
+                        .dx = 1.0, .dy = 1.0, .height = 0.0 };
+        rs_subap_params_t nsp;
+        rs_subap_params_default(&nsp);
+        nsp.n_looks = 12;
+        nsp.overlap = 0.0;
+
+        rs_subap_stack_t s;
+        RS_CHECK_OK(rs_subaperture_from_cphd(&c, &g, &nsp, &s));
+
+        rs_microm_params_t base;
+        rs_microm_params_default(&base);
+        base.win_az = base.win_rg = 24;
+        base.stride_az = base.stride_rg = 12;
+        base.coherence_min = 0.0;
+        base.upsample_az = base.upsample_rg = 10;
+
+        rs_microm_params_t fast = base, slow = base;
+        slow.no_optimize = 1;
+
+        rs_microm_t mf, ms;
+        RS_CHECK_OK(rs_microm_track(&s, &fast, &mf));
+        RS_CHECK_OK(rs_microm_track(&s, &slow, &ms));
+
+        /* Same shape, so a per-window comparison is meaningful at all. */
+        RS_CHECK(mf.n_win == ms.n_win);
+        RS_CHECK(mf.n_looks == ms.n_looks);
+
+        /* And not silently empty. A result of all zeros would satisfy every
+         * agreement check below, which is exactly why this comes first. */
+        double slow_energy = 0.0;
+        for (size_t i = 0; i < ms.n_win * ms.n_looks; i++) {
+            slow_energy += fabs(ms.disp_az[i]);
+        }
+        RS_CHECK(slow_energy > 0.0);
+
+        /* COMPARE ON THE CIRCULAR PERIOD, NOT THE RAW DIFFERENCE.
+         *
+         * The correlation surface is periodic in the patch size, so on a 24-pixel
+         * patch a shift of +12.5 and one of -11.5 name the SAME point. The two
+         * modes unwrap at slightly different places -- the local path can refine
+         * past +n/2, the exhaustive path folds at the padded midpoint -- so the
+         * boundary case shows up as a raw difference of exactly one period.
+         *
+         * Measured on a variant of this fixture: one sample differed by 24.000 px
+         * raw and 0.000 px wrapped -- the local path reported +12.500 where the
+         * exhaustive one reported -11.500, which on a 24-pixel patch is the same
+         * place. Comparing raw differences would have recorded that as the worst
+         * disagreement in the suite when it is not a disagreement at all. Folding
+         * first is what makes the remaining differences mean something. */
+        const double step = 1.0 / (double)base.upsample_az;
+        const double period = (double)base.win_az;
+        size_t n = 0, differing = 0, differing_good = 0;
+        double worst = 0.0;
+        for (size_t w = 0; w < mf.n_win; w++) {
+            for (size_t k = 0; k < mf.n_looks; k++) {
+                const size_t i = w * mf.n_looks + k;
+                double d = fmod(fabs(mf.disp_az[i] - ms.disp_az[i]), period);
+                if (d > period / 2.0) d = period - d;
+                if (d > worst) worst = d;
+                if (d > 1.5 * step) {
+                    differing++;
+                    if (mf.quality[w] >= 0.7) differing_good++;
+                }
+                n++;
+            }
+        }
+        printf("    %zu of %zu samples differ by more than %.3f px "
+               "(wrapped); worst %.3f px; %zu of those in windows of "
+               "quality >= 0.7\n", differing, n, 1.5 * step, worst, differing_good);
+
+        /* THE SHAPE OF THE AGREEMENT, WHICH IS THE INFORMATIVE PART.
+         *
+         * Where there is something to track the two modes agree exactly, and the
+         * disagreements are confined to the windows that are tracking noise.
+         * Measured on this fixture: 10 of 108 samples differ, spread over the
+         * windows of quality 0.39 to 0.61, by 1.2 to 9.6 px. Every window above
+         * 0.61 agrees on every look. The three best windows -- the only ones whose
+         * shifts any spectrum should be read from -- contribute nothing.
+         *
+         * That is the expected mechanism (see rs_coreg_refine_t): a global search
+         * can only beat the local one where the surface has competing lobes of
+         * comparable height, which is what a window with no target looks like. On
+         * such a window neither answer is a measurement, so the difference between
+         * them is not a correction.
+         *
+         * The threshold assertion is the load-bearing one. A sign error, a padding
+         * error or a wrong unwrap in the exhaustive path would scatter differences
+         * across every window regardless of quality, which this catches, while
+         * the noise-window differences it permits are the phenomenon the mode
+         * exists to expose. */
+        RS_CHECK(differing_good == 0);
+        RS_CHECK(differing * 4 <= n);
+
+        rs_microm_free(&ms);
+        rs_microm_free(&mf);
+        rs_subap_stack_free(&s);
+        rs_cphd_free(&c);
+    }
+
+    /* The refusal path. An impossible exhaustive surface must fail before the
+     * tracker allocates, not once per window inside the loop -- otherwise the
+     * result is a complete, well-formed set of windows that are all zero. */
+    RS_CASE("--no-optimize refuses an impossible surface up front");
+    {
+        const rs_sim_tgt_t tg[] = { { .x = 0.0, .y = 0.0, .z = 0.0, .rcs = 1.0 } };
+        rs_cphd_t c;
+        RS_CHECK_OK(rs_sim_scene(&c, tg, 1, 4.0, 400.0, 128, 0.5));
+
+        rs_grid_t g = { .origin = {0,0,0}, .n_x = 32, .n_y = 32,
+                        .dx = 1.0, .dy = 1.0, .height = 0.0 };
+        rs_subap_params_t nsp;
+        rs_subap_params_default(&nsp);
+        nsp.n_looks = 4;
+        nsp.overlap = 0.0;
+
+        rs_subap_stack_t s;
+        RS_CHECK_OK(rs_subaperture_from_cphd(&c, &g, &nsp, &s));
+
+        rs_microm_params_t mp;
+        rs_microm_params_default(&mp);
+        mp.win_az = mp.win_rg = 32;
+        mp.stride_az = mp.stride_rg = 16;
+        mp.coherence_min = 0.0;
+        mp.no_optimize = 1;
+        mp.upsample_az = mp.upsample_rg = 20000;  /* 640000^2 samples */
+
+        rs_microm_t m;
+        RS_CHECK_ERR(rs_microm_track(&s, &mp, &m), RS_ERR_RANGE);
+        /* rs_microm_track() zeroes its output before any validation, so the
+         * caller's "check status, then free" is safe on this path too. */
+        rs_microm_free(&m);
+
+        rs_subap_stack_free(&s);
+        rs_cphd_free(&c);
+    }
+
     RS_CASE("the sources' master-slave pair does NOT recover the frequency");
     {
         /* A NEGATIVE RESULT, recorded rather than deleted.

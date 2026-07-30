@@ -207,6 +207,20 @@ typedef struct {
      * this field the sidecar would certify such a run as literal. */
     int pair_reference;
 
+    /* Nonzero: the measurement feeding this cube was made in the unoptimised
+     * audit mode -- exhaustive correlation peak search, serial execution. Set by
+     * --no-optimize and, like the three fields above, recorded rather than acted
+     * on; rs_tomo_focus() does the same arithmetic either way.
+     *
+     * It belongs in the sidecar because the two modes can report different
+     * tracked shifts, so two cubes of the same scene may differ for this reason
+     * alone. Without the field a reader comparing them has no way to know that,
+     * and the natural conclusion from a difference -- that something in the scene
+     * or the geometry changed -- would be wrong. rs_tomo_write_metadata() prints
+     * it with an [UNOPTIMIZED] tag so it survives a glance rather than needing to
+     * be looked for. */
+    int no_optimize;
+
     /* Provenance of the measurement this cube was inverted from.
      *
      * These do not affect the arithmetic. They are recorded because a depth

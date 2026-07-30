@@ -292,6 +292,44 @@ typedef struct {
      * distributed clutter, where the premise that most of the scene is static
      * and well-tracked actually holds. */
     int remove_common_mode;
+
+    /* Nonzero: run the tracker as an unoptimised reference. Set by --no-optimize.
+     *
+     * Two things change, and only one of them can change a number:
+     *
+     *   1. The correlator searches the WHOLE zero-padded surface for its peak
+     *      instead of the neighbourhood of the strongest integer sample
+     *      (RS_COREG_REFINE_EXHAUSTIVE). This CAN move a reported shift, and is
+     *      the point of the flag. See rs_coreg_refine_t for the precise
+     *      circumstance under which the two disagree -- it is narrower than it
+     *      sounds, because the optimised path's integer peak is already a global
+     *      maximum over the sampled surface.
+     *
+     *   2. The loop over windows runs on one thread. This cannot change a number.
+     *      Windows are independent and each writes only its own output slots.
+     *
+     * MEASURED COST, WHICH IS FAR SMALLER THAN THE MECHANISM SUGGESTS. The
+     * exhaustive correlator is 1.7x to 3.2x the optimised one per call across
+     * every configuration tried: 2.5x at the tomo and mmotion defaults (32x32
+     * window, 10x20 upsampling, a 320x640 padded surface at 1.56 MB), 1.7x at
+     * 24x24 and 10x10, 3.2x at 64x64 and 10x20.
+     *
+     * That is not the ratio one guesses from "upsample the whole surface instead
+     * of a neighbourhood", and the reason is worth knowing: the optimised path is
+     * not cheap either. It evaluates (2*upsample_az+1)*(2*upsample_rg+1) points
+     * and each one costs O(win_az*win_rg), so at the defaults it already does
+     * about 880 thousand complex multiply-accumulates -- against roughly 3.6
+     * million butterflies for the padded transform. Same order. The O(N) per
+     * refinement point is what closes the gap.
+     *
+     * Serialising the window loop costs more than the search does: about 4x
+     * wall-clock on eight cores. Both together put a full-scale run in single
+     * digits, not orders of magnitude.
+     *
+     * A run made with this set is NOT a better measurement than one without. It
+     * is a second measurement by a slower route, whose only use is comparison
+     * with the first. Neither passes a null test on its own -- see README.md. */
+    int no_optimize;
 } rs_microm_params_t;
 
 /* Per-window micro-motion result over the whole sub-look stack.

@@ -86,6 +86,66 @@ int main(void)
     RS_CHECK_ERR(rs_focus_backproject(&cphd, &grid, cphd.n_pulse, 1, &sub), RS_ERR_ARG);
     RS_CHECK_ERR(rs_focus_backproject(&cphd, &grid, 0, 0, &sub), RS_ERR_ARG);
 
+    /* THE CLAIM --no-optimize MAKES ABOUT BACKPROJECTION, TESTED RATHER THAN
+     * ASSERTED.
+     *
+     * rs_focus_opts_t states that the single-threaded mode produces bitwise
+     * identical samples, because the parallel loop is over cells and each cell
+     * accumulates privately over pulses in chronological order. An untested
+     * statement of that kind is worth nothing -- it is exactly the sort of claim
+     * that stays true until someone adds a reduction clause -- so it is checked
+     * to the bit, not to a tolerance. A tolerance would pass on a build that HAD
+     * acquired threading drift, which is the one thing this must detect.
+     *
+     * If this ever fails, the flag has become load-bearing and rs_focus_opts_t's
+     * documentation is wrong and must be corrected before the flag is cited.
+     *
+     * Note what it does NOT prove: with OpenMP absent, or with one core, both
+     * calls run the same code and the comparison is vacuous. It is still worth
+     * having -- it is not vacuous on the machines that matter, and CMakeLists.txt
+     * prints whether OpenMP was found. */
+    RS_CASE("single-threaded focusing is bitwise identical to threaded");
+    {
+        rs_slc_t threaded, serial;
+        RS_CHECK_OK(rs_slc_alloc(&threaded, grid.n_x, grid.n_y));
+        RS_CHECK_OK(rs_slc_alloc(&serial, grid.n_x, grid.n_y));
+
+        const rs_focus_opts_t par = { .single_thread = 0 };
+        const rs_focus_opts_t seq = { .single_thread = 1 };
+        RS_CHECK_OK(rs_focus_backproject_opts(&cphd, &grid, 0, cphd.n_pulse, &par,
+                                              &threaded));
+        RS_CHECK_OK(rs_focus_backproject_opts(&cphd, &grid, 0, cphd.n_pulse, &seq,
+                                              &serial));
+
+        size_t differing = 0;
+        for (size_t i = 0; i < threaded.n_az * threaded.n_rg; i++) {
+            if (crealf(threaded.data[i]) != crealf(serial.data[i]) ||
+                cimagf(threaded.data[i]) != cimagf(serial.data[i])) {
+                differing++;
+            }
+        }
+        RS_CHECK(differing == 0);
+
+        /* A NULL 'opts' must mean the default, so the wrapper cannot quietly
+         * change behaviour for its existing callers. */
+        rs_slc_t defaulted;
+        RS_CHECK_OK(rs_slc_alloc(&defaulted, grid.n_x, grid.n_y));
+        RS_CHECK_OK(rs_focus_backproject_opts(&cphd, &grid, 0, cphd.n_pulse, NULL,
+                                              &defaulted));
+        size_t default_diff = 0;
+        for (size_t i = 0; i < threaded.n_az * threaded.n_rg; i++) {
+            if (crealf(defaulted.data[i]) != crealf(threaded.data[i]) ||
+                cimagf(defaulted.data[i]) != cimagf(threaded.data[i])) {
+                default_diff++;
+            }
+        }
+        RS_CHECK(default_diff == 0);
+
+        rs_slc_free(&defaulted);
+        rs_slc_free(&serial);
+        rs_slc_free(&threaded);
+    }
+
     rs_slc_free(&sub);
     rs_slc_free(&img);
     rs_cphd_free(&cphd);

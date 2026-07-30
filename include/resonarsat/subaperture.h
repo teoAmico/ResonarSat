@@ -128,6 +128,18 @@ typedef struct {
      * tracker can measure slave(i) against master(i) as the sources describe.
      * Paper mode only; doubles the stack's memory. */
     int    pair;
+
+    /* Nonzero: focus each look on one thread, in ascending cell order.
+     *
+     * Passed straight to rs_focus_opts_t.single_thread by
+     * rs_subaperture_from_cphd(), and ignored by rs_subaperture_split(), which
+     * does no backprojection. Set by --no-optimize. Read
+     * rs_focus_opts_t before treating it as a numerical control: the focused
+     * samples are bitwise identical either way, and this exists so that can be
+     * checked rather than assumed. It is recorded in the stack's params, and from
+     * there in the tomogram sidecar, so a product says which schedule produced
+     * it. */
+    int    single_thread;
 } rs_subap_params_t;
 
 /* A stack of sub-look images sharing one geometry.

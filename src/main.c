@@ -83,6 +83,50 @@ static double rs_opt_double(int argc, char **argv, const char *name, double fall
     return v ? atof(v) : fallback;
 }
 
+/* Resolve --no-optimize and say on stderr exactly what it did and did not do.
+ *
+ * One flag rather than three because the audit is only meaningful if the whole
+ * chain is in the same mode, and a caller who has to remember three names will
+ * one day set two of them. The library keeps the settings separate per stage --
+ * rs_focus_opts_t, rs_subap_params_t, rs_microm_params_t -- so nothing here
+ * depends on global mutable state and each stage still documents its own
+ * behaviour; this function is the single place that ties them together.
+ *
+ * The notice is printed, and printed in this much detail, because the flag's name
+ * invites a claim it does not support. "Unoptimized baseline" suggests the
+ * numbers that come out are more trustworthy, and for the backprojection half
+ * that is not merely unsupported but false: the output is bitwise identical, so a
+ * run made with the flag is the same measurement, not a better one. Only the
+ * correlation peak search can move a number. Saying so at the point of use costs
+ * four lines and keeps a comparison from being read as a confirmation. */
+static int rs_opt_no_optimize(int argc, char **argv)
+{
+    if (!rs_opt_flag(argc, argv, "--no-optimize")) return 0;
+
+    fprintf(stderr,
+        "--no-optimize: unoptimised reference mode.\n"
+        "  correlation peak search  WHOLE zero-padded surface, global maximum,\n"
+        "                           instead of one pixel about the integer peak.\n"
+        "                           This is the only change that can move a number.\n"
+        "  backprojection           single-threaded, ascending cell order. The\n"
+        "                           samples are BITWISE IDENTICAL to a threaded run:\n"
+        "                           each cell accumulates privately over pulses in\n"
+        "                           chronological order and no accumulator is shared,\n"
+        "                           so there is no threading drift here to remove.\n"
+        "                           This half is a reproducibility check, not a fix.\n"
+        "  tracking loop            serial, so window visitation order is fixed.\n"
+        "                           Also cannot change a result; windows are\n"
+        "                           independent.\n"
+        "  Measured cost: the exhaustive search is 1.7-3.2x the optimised one per\n"
+        "  call (2.5x at these defaults), and running serially costs about 4x more\n"
+        "  on eight cores. Single digits overall, not orders of magnitude -- this\n"
+        "  is affordable on a full-scale scene.\n"
+        "  A result from this mode is a second measurement by a slower route, to be\n"
+        "  compared with the first -- not a more trustworthy one. Neither passes a\n"
+        "  null test alone.\n");
+    return 1;
+}
+
 /* Report the vibration band an acquisition can observe, and what each choice
  * costs in azimuth resolution.
  *
@@ -754,6 +798,7 @@ static int rs_cmd_focus(int argc, char **argv)
                "                       [--size N] [--cell M] [--offset X,Y | --at LAT,LON]\n"
                "                       [--pulse-start N --pulse-count N] [--raw FILE]\n"
                "                       [--rbins N] [--max-pulses N] [--pulse-stride N]\n"
+               "                       [--no-optimize]\n"
                "\n"
                "--rbins reads a window of range bins and --max-pulses caps how many\n"
                "pulses are READ, not merely used. A large collect will not fit in\n"
@@ -819,7 +864,10 @@ static int rs_cmd_focus(int argc, char **argv)
     printf("backprojecting %zu pulses onto %zux%zu cells of %.2f m ...\n",
            p_count, grid.n_y, grid.n_x, cell);
 
-    st = rs_focus_backproject(&c, &grid, p_start, p_count, &img);
+    const rs_focus_opts_t fopts = {
+        .single_thread = rs_opt_no_optimize(argc, argv)
+    };
+    st = rs_focus_backproject_opts(&c, &grid, p_start, p_count, &fopts, &img);
     if (st != RS_OK) {
         rs_report_error("focus", st);
         rs_slc_free(&img); rs_cphd_free(&c);
@@ -841,8 +889,14 @@ static int rs_cmd_focus(int argc, char **argv)
             for (size_t i = 0; i < img.n_az * img.n_rg; i++) {
                 amp[i] = (double)cabsf(img.data[i]);
             }
+            /* The tag rides in the axis description because that is the only
+             * free-text field the .hdr sidecar has. A raw cube is the input to
+             * every measurement made off this image, so which arithmetic produced
+             * it has to travel with the pixels -- a bare .f32 carries nothing. */
             if (rs_raster_write_cube(amp, img.n_az, img.n_rg, 1, raw,
-                                     "azimuth, range, amplitude") == RS_OK) {
+                                     fopts.single_thread
+                                       ? "azimuth, range, amplitude [UNOPTIMIZED]"
+                                       : "azimuth, range, amplitude") == RS_OK) {
                 printf("wrote %s (%zu x %zu float32 amplitudes) and %s.hdr\n",
                        raw, img.n_az, img.n_rg, raw);
             }
@@ -1066,6 +1120,15 @@ static int rs_cmd_mmotion(int argc, char **argv)
                "                          [--upsample N]\n"
                "                          [--size N] [--cell M] [--win N]\n"
                "                          [--coherence F] [--out PREFIX]\n"
+               "                          [--no-optimize]\n"
+               "\n"
+               "--no-optimize is an audit baseline, not a better measurement. It\n"
+               "searches the WHOLE upsampled correlation surface for the peak instead\n"
+               "of the neighbourhood of the integer peak, and runs serially. Only the\n"
+               "first of those can change a number; backprojection is bitwise identical\n"
+               "either way (see rs_focus_opts_t). Measured cost is 2.5x per correlator\n"
+               "call at these defaults plus about 4x for losing the threads -- single\n"
+               "digits, so it is affordable on a full-scale scene.\n"
                "\n"
                "--coherence masks windows whose sub-looks do not correlate (default\n"
                "0.4). Isolated point targets on an empty scene score below that even\n"
@@ -1130,10 +1193,15 @@ static int rs_cmd_mmotion(int argc, char **argv)
 
     rs_warn_sampling(&c, c.n_pulse, cell);
 
+    /* Resolved before the sub-apertures are built, because that is the stage it
+     * first has to reach. */
+    const int no_optimize = rs_opt_no_optimize(argc, argv);
+
     rs_subap_params_t sp;
     rs_subap_params_default(&sp);
     sp.n_looks = (size_t)rs_opt_double(argc, argv, "--n", 16);
     sp.overlap = rs_opt_double(argc, argv, "--overlap", 0.40);
+    sp.single_thread = no_optimize;
     const int ref_mode = rs_parse_reference(argc, argv, &sp);
     if (ref_mode < 0) { rs_cphd_free(&c); return 1; }
     const char *subap_route = rs_opt(argc, argv, "--subap");
@@ -1161,6 +1229,7 @@ static int rs_cmd_mmotion(int argc, char **argv)
     rs_microm_params_t mp;
     rs_microm_params_default(&mp);
     mp.reference = (rs_microm_ref_t)ref_mode;
+    mp.no_optimize = no_optimize;
     {
         /* --estimator selects WHAT is measured, not merely how well. Phase and
          * correlation live in different regimes; see rs_microm_estimator_t. */
@@ -1538,6 +1607,7 @@ static int rs_cmd_tomo(int argc, char **argv)
                "                       [--no-window] [--keep-mean] [--regularisation F]\n"
                "                       [--eq22-literal-t VALUE (experimental)]\n"
                "                       [--geocode FILE.csv] [--patent-exact]\n"
+               "                       [--no-optimize]\n"
                "                       [--out FILE] [--section N --section-out FILE.png]\n"
                "\n"
                "--velocity and --frequency are REQUIRED and have no defaults.\n"
@@ -1765,9 +1835,17 @@ static int rs_cmd_tomo(int argc, char **argv)
         return 1;
     }
 
+    /* Orthogonal to --patent-exact and therefore not rejected alongside it: the
+     * flag changes how the correlation peak is searched for, not which model,
+     * observable, solver or wavelength convention is used. Every choice
+     * --patent-exact pins is untouched, so the sidecar's "exact" certification
+     * remains correct and gains an [UNOPTIMIZED] tag beside it. */
+    const int no_optimize = rs_opt_no_optimize(argc, argv);
+
     rs_subap_params_t sp;
     rs_subap_params_default(&sp);
     sp.n_looks = (size_t)rs_opt_double(argc, argv, "--n", 64);
+    sp.single_thread = no_optimize;
     if (patent_exact) sp.window = 0;
 
     int ref_mode = rs_parse_reference(argc, argv, &sp);
@@ -1824,6 +1902,7 @@ static int rs_cmd_tomo(int argc, char **argv)
     rs_microm_params_t mp;
     rs_microm_params_default(&mp);
     mp.reference = (rs_microm_ref_t)ref_mode;
+    mp.no_optimize = no_optimize;
     {
         /* --estimator selects WHAT is measured, not merely how well. Phase and
          * correlation live in different regimes; see rs_microm_estimator_t. */
@@ -1937,6 +2016,7 @@ static int rs_cmd_tomo(int argc, char **argv)
     tp.subap_window = sp.window;
     tp.coherence_min = mp.coherence_min;
     tp.pair_reference = (mp.reference == RS_MICROM_REF_PAIR);
+    tp.no_optimize = no_optimize;
     const char *ref_name = (mp.reference == RS_MICROM_REF_PAIR) ? "pair" :
                            (mp.reference == RS_MICROM_REF_ADJACENT) ? "adjacent" :
                            "first";
@@ -2138,7 +2218,9 @@ static int rs_cmd_tomo(int argc, char **argv)
     const char *out = rs_opt(argc, argv, "--out");
     if (out) {
         rs_raster_write_cube(tomo.profile, tomo.n_win_az, tomo.n_win_rg, tomo.n_depth,
-                             out, "window_az, window_rg, depth");
+                             out, no_optimize
+                                    ? "window_az, window_rg, depth [UNOPTIMIZED]"
+                                    : "window_az, window_rg, depth");
         char meta[512];
         snprintf(meta, sizeof meta, "%s.meta", out);
         FILE *mf = fopen(meta, "w");
@@ -2244,6 +2326,12 @@ static size_t rs_sweep_one_scene(const char *path, const rs_tomo_params_t *tp,
         rs_subap_params_default(&sp);
         sp.n_looks = n_looks;
         sp.overlap = overlap;
+        /* Carried on the tomo params rather than as another argument to this
+         * already long signature. It is the same flag the caller set from
+         * --no-optimize, and the sweep tracks once per offset -- outside the
+         * (v, f) loop -- so the exhaustive path costs one pass here, not one per
+         * row. */
+        sp.single_thread = tp->no_optimize;
 
         rs_subap_stack_t s;
         /* Through the same route selector the other commands use. A sweep
@@ -2259,6 +2347,7 @@ static size_t rs_sweep_one_scene(const char *path, const rs_tomo_params_t *tp,
         mp.win_az = mp.win_rg = 32;
         mp.stride_az = mp.stride_rg = 16;
         mp.coherence_min = coherence;
+        mp.no_optimize = tp->no_optimize;
 
         rs_microm_t m;
         rs_spectrum_t spec;
@@ -2339,7 +2428,7 @@ static int rs_cmd_sweep(int argc, char **argv)
                "                        [--range LO,HI] [--steps N] [--size N]\n"
                "                        [--grid-cell M] [--offsets X,Y:X,Y:...] [--fmin HZ]\n"
                "                        [--model A|B|C|D] [--subap pulse|uniform|paper]\n"
-               "                        [--rbins N]\n"
+               "                        [--rbins N] [--no-optimize]\n"
                "\n"
                "Re-runs tomographic focusing over a grid of scale factors applied\n"
                "to --velocity and --frequency, and reports where the strongest\n"
@@ -2368,6 +2457,9 @@ static int rs_cmd_sweep(int argc, char **argv)
     tp.frequency  = rs_opt_double(argc, argv, "--frequency", 0.0);
     tp.depth_max  = rs_opt_double(argc, argv, "--depth", 10.0);
     tp.depth_cell = rs_opt_double(argc, argv, "--cell", 1.0);
+    /* rs_sweep_one_scene() reads this off the params to reach the sub-aperture
+     * and tracking stages, since it takes no separate flag argument. */
+    tp.no_optimize = rs_opt_no_optimize(argc, argv);
 
     /* The sweep was hardwired to Model A. Model D maps depth from the measured
      * frequency instead of a baseline, and the two respond to the assumed

@@ -80,6 +80,19 @@ resonarsat_status_t rs_focus_backproject(const rs_cphd_t *cphd,
                                          size_t pulse_count,
                                          rs_slc_t *img)
 {
+    return rs_focus_backproject_opts(cphd, grid, pulse_start, pulse_count, NULL, img);
+}
+
+/* Backproject one pulse window onto the ground grid, with execution options.
+ * See rs_focus_backproject() for the arithmetic and rs_focus_opts_t for the
+ * options -- which change scheduling only, never the result. */
+resonarsat_status_t rs_focus_backproject_opts(const rs_cphd_t *cphd,
+                                              const rs_grid_t *grid,
+                                              size_t pulse_start,
+                                              size_t pulse_count,
+                                              const rs_focus_opts_t *opts,
+                                              rs_slc_t *img)
+{
     if (!cphd || !grid || !img || !cphd->signal || !img->data) return RS_ERR_ARG;
 
     if (pulse_start >= cphd->n_pulse || pulse_count == 0 ||
@@ -109,8 +122,22 @@ resonarsat_status_t rs_focus_backproject(const rs_cphd_t *cphd,
 
     const long total = (long)(n_x * n_y);
 
+    /* One loop, one body, two schedules.
+     *
+     * The serial mode is expressed as OpenMP's 'if' clause rather than as a
+     * second copy of the inner loop. A duplicated body is the standard way to
+     * write an "unoptimized reference" and it is the wrong way here: the two
+     * copies would drift, and a reference implementation that has diverged from
+     * the thing it is checking reports the divergence as a finding. With one body
+     * the arithmetic is the same expression tree by construction, so the test
+     * that asserts the two modes agree bitwise is testing the scheduler, which is
+     * the only thing that differs. */
+    const int single_thread = opts && opts->single_thread;
+
 #ifdef _OPENMP
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for schedule(static) if (!single_thread)
+#else
+    (void)single_thread;
 #endif
     for (long cell = 0; cell < total; cell++) {
         /* Row index runs along track (azimuth), column across it (range). */
