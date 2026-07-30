@@ -130,3 +130,112 @@ cell, so the target spans about sixteen cells of a thirty-two cell window; at
 159 looks with 0.88 overlap it is 1.27 m against 0.4 m, about three cells of
 thirty-two. That is the next thing to vary, and it is not one of the four
 candidates this bisection set out to test.
+
+
+---
+
+# The second bisection: what actually breaks it
+
+The first bisection ruled out upsampling, overlap, route and clutter, and left
+"the correlation tracking stage". Varying the remaining geometry isolates two
+separate limits, and the second one has a closed form.
+
+## Limit 1: amplitude
+
+The working configuration (128 looks, zero overlap, pulse route) recovers a
+0.5 Hz target at 20 mm and misses the identical target at 4 mm:
+
+```
+  C0, 20 mm:  win 199 -> 0.504 Hz, prominence 15.9   RECOVERED
+  C0,  4 mm:  0.30 0.30 0.20 2.97 Hz                 missed
+```
+
+So there is a sensitivity threshold between 4 and 20 mm for that geometry --
+between 4.19 and 21 px of azimuth displacement against a tracking noise that
+saturates the search window. Ordinary, and worth knowing.
+
+## Limit 2: the observation ratio, and it is not about signal level
+
+The Khufu operating point misses at BOTH amplitudes:
+
+```
+  Khufu config, 20 mm:  1.569 1.569 1.569 0.785 Hz   MISSED
+  Khufu config,  4 mm:  1.203 1.569 1.046 0.785 Hz   MISSED
+```
+
+Five times the signal changes nothing, so this is not a sensitivity limit. What
+changes between the two configurations is what the target LOOKS like in a
+sub-look.
+
+A vibrating target does not image as a point. It images as a paired-echo train
+with spacing `f * lambda*R/(2*v_p)`, and the sub-look resolves that train when
+the spacing exceeds its own resolution `lambda*R/(2*v_p*t_sap)`. The ratio is:
+
+```
+   [ f * lambda*R/(2 v_p) ]  /  [ lambda*R/(2 v_p t_sap) ]  =  f * t_sap  =  ETA
+```
+
+**The ghost-resolution ratio is exactly the observation ratio.** Every case
+measured falls in line:
+
+| case | `t_sap` | f | eta | ghosts | result |
+|---|---|---|---|---|---|
+| passing control 0.3 Hz | 0.156 s | 0.3 | 0.047 | unresolved | ok |
+| passing control 0.9 Hz | 0.156 s | 0.9 | 0.141 | unresolved | ok |
+| C0, 20 mm | 0.156 s | 0.5 | 0.078 | unresolved | **recovered** |
+| C0, 4 mm | 0.156 s | 0.5 | 0.078 | unresolved | missed — amplitude |
+| Khufu config, 4 mm | 1.002 s | 0.5 | **0.501** | **resolved** | missed |
+| Khufu config, 20 mm | 1.002 s | 0.5 | **0.501** | **resolved** | missed |
+
+Once `eta` approaches 0.5 the tracked feature fragments into a train of
+comparably bright spots, the correlation surface acquires competing peaks of
+similar height, and the argmax hops between them. The shift series shows exactly
+that -- not wander but discrete jumps, returning repeatedly to the same handful
+of offsets:
+
+```
+  window 180:  0.00  0.05  0.15  13.12  15.25 -12.20 -14.38  16.52 -0.28  3.05  5.20 ...
+```
+
+and `quality`, which is the mean correlation PEAK HEIGHT (`microm.c:510`), sits
+at 0.08-0.30 while the argmax spans the entire window. A modest peak that is not
+the highest peak is precisely the signature of competing lobes.
+
+This is not a defect in this implementation. It is the upper bound on `t_sap`
+that Vattulainen et al. state qualitatively as their third competing effect --
+"longer sub-aperture times can make the feature less distinct... since the
+changing signal phase is integrated over a greater period" -- given a
+quantitative form. Their validated runs sit at `eta` 0.39-0.69, right at the
+boundary, and they report performance degrading across that range.
+
+## What this means for the Khufu run
+
+`t_sap` there was 1.643 s, so `eta` reaches 0.5 at **0.30 Hz**. Above that the
+paired echoes resolve and correlation tracking degrades. Combined with the
+displacement-averaging nulls at 0.609 Hz and above, the configuration's usable
+band was roughly **0 to 0.3 Hz** -- not the 2.53 Hz its own output reported as
+the observable band.
+
+The run was misconfigured, in a way none of the four original candidates named
+and which the printed band figure actively concealed.
+
+## The most dangerous single result here
+
+Narrowing the correlation window raises quality and prominence monotonically
+while leaving the answer wrong:
+
+| win | fill fraction | quality | p-p excursion | frequency | prominence |
+|---|---|---|---|---|---|
+| 32 | 0.10 | 0.08-0.12 | 10-32 px | 1.20 1.57 1.05 0.79 | 7-11 |
+| 16 | 0.20 | 0.16-0.21 | 15.8-16.0 px | 0.42 0.26 0.42 0.79 | 9-26 |
+| 8 | 0.40 | 0.30 | 7.7-7.9 px | **0.209 in all four** | **47-57** |
+
+At `--win 8` all four windows containing the target agree on 0.209 Hz with
+prominence near 50, against an injected 0.5 Hz. **Confident, spatially
+coherent, and wrong** -- four adjacent windows concurring, high prominence, and
+the excursion still saturating the window. Every heuristic this project uses to
+decide a peak is real would pass it.
+
+Note also that the excursion equals the window width at every size tried, which
+is what a correlation argmax does when no peak dominates: the reported shift is
+bounded only by the search extent.
