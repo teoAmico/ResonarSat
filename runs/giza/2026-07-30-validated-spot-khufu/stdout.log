@@ -1,0 +1,9 @@
+--at 29.979175,31.134186 resolves to --offset -152,-552 in this product's image plane
+sub-apertures: 182 looks, dt 0.1799 s
+  observable band  f_max 2.78 Hz   AT sub-look resolution 5.58 m
+sub-pixel refinement: 1/10 px (default 1/10 azimuth, 1/20 range)
+tracked 961 windows (31 x 31); 0 pass the 0.40 coherence mask
+  no window is coherent enough to carry a measurement. Any
+  frequency reported below is tracking noise, not a mode.
+wrote runs/giza/2026-07-30-validated-spot-khufu/spot_n182_ov40.csv (961 windows x 182 looks, pre-spectrum)
+spectra: 92 bins, 0.0305 Hz resolution

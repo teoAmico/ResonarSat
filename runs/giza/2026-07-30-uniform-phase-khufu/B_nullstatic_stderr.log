@@ -1,0 +1,10 @@
+note: Capella product -- its signal does not follow its declared SGN=+1, so the
+      FX-to-delay transform is inverted to match Capella's own reference reader.
+      Without this the image is mirrored in range.
+cphd: skipped 8 vector(s) flagged invalid and 0 with non-finite geometry, of 335149
+warning: grid cell 2.000 m is coarser than the 0.051 m azimuth
+         resolution this collect supports. The image will alias:
+         each scatterer gains ghost peaks that resemble real
+         targets. Use --cell 0.051 or finer, or treat the result
+         as deliberately multi-looked.
+  static trial 1/8: prominence 0.0 at 0.031 Hz

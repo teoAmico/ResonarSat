@@ -1,0 +1,389 @@
+# Run: 2026-07-30 giza / validated-spot-khufu
+
+**Question this run is meant to answer:** Does the operating point that
+Vattulainen et al. (2026) validated against LVDT ground truth -- a few dozen
+sub-apertures at moderate overlap, correlation tracking -- recover anything at
+Khufu?
+
+- git commit: `51bfcd6`
+- started:    2026-07-30T16:52:13Z
+- host:       Darwin arm64 (8 cores, 25.8 GB RAM), OpenMP enabled
+
+## Why this run exists
+
+Every micro-motion run this project has made was outside the envelope anyone has
+validated, and it took reading the metrological assessment to notice.
+
+Vattulainen et al., *Assessment of Spaceborne SAR Micro-Motion Measurement for
+Vibration-Based SHM*, IEEE Access 14 (2026) 6043, measure a corner reflector on a
+programmable shaker with a synchronous LVDT, over nine Umbra spotlight
+acquisitions. Their Table 3 gives the processing parameters for all nine:
+
+| | their range | this project's runs so far |
+|---|---|---|
+| sub-apertures `N` | **26 – 81** | 128, 512, 2048 |
+| overlap `Omega` | **23 – 49%** | 40% (defaults), 90%, 99% |
+| observation ratio `eta` | **0.39 – 0.69**, always below 1 | 0.78 and 31.25 in the phase runs |
+| estimator | **correlation (SPOT)** | correlation under the patent chain; phase in the uniform runs |
+
+`README.md` asserted the opposite -- that "the validated work uses thousands of
+sub-apertures at 90-99% overlap rather than a few dozen" -- and that line is what
+set `--overlap 0.99` in `2026-07-30-uniform-phase-khufu`. The paper's own
+reasoning (Section VI-A4) is that three effects compete: Nyquist sampling wants a
+short `t_sap`, cross-correlation precision wants a long one for finer azimuth
+resolution, and motion-induced blurring puts a ceiling on it. "The combined
+result of all three effects is a moderate overlap value and an optimal `f_s` near
+the Nyquist rate."
+
+So this run is the first at an operating point somebody has checked against
+ground truth.
+
+## Collect
+
+```
+CAPELLA_C13_SP_CPHD_HH_20241004001939_20241004002012.cphd  ->  data/giza.cphd
+  Capella open data, CC BY 4.0
+  39,180,270,944 bytes (verified)
+  dwell 32.869 s   335,141 pulses x 25,073 range bins   PRF 10,196.35 Hz
+  carrier 9.3000 GHz   wavelength 0.0322 m
+```
+
+Same collect and same grid as every previous Giza run: `--at
+29.979175,31.134186` -> `--offset -152,-552`, Khufu.
+
+## Deriving the parameters -- and an unplanned check of the implementation
+
+Targeting `eta ~ 0.6` for a 2 Hz vibration gives `t_sap = 0.3 s`. At
+`Omega = 0.4`, `N = 182`. ResonarSat's uniform band layout
+(`rs_subaperture_split()`, `denom = N - (N-1)*Omega`) then gives:
+
+```
+denom  109.6000     t_sap 0.2999 s     dt 0.1799 s
+f_s = 1/dt = 5.557 Hz          f_max = 1/(2 dt) = 2.779 Hz
+```
+
+The paper states the same layout in different variables -- aperture fraction
+`alpha = t_sap/t_a`, then `N = (alpha^-1 - Omega)/(1 - Omega)` (Eq. 5) and
+`dt = (t_a - t_sap)/(N - 1)` (Eq. 6). Substituting `t_sap = 0.2999`:
+
+```
+alpha 0.009124   ->   Eq. 5 gives N  = 182.0000    (chosen: 182)
+                      Eq. 6 gives dt = 0.1799 s    (layout: 0.1799 s)
+```
+
+**Both reproduce exactly.** That was not the point of the run, but it is the
+first independent confirmation that this project's uniform sub-aperture layout
+agrees with a published formulation of the same decomposition, to four decimal
+places, in a paper that never saw this code.
+
+Two consequences of the choice worth stating before the result:
+
+- **`--size 512` is forced.** `rs_subaperture_split()` needs `n_az >= 2*n_looks`,
+  so 182 looks need 364 azimuth lines. That costs 4x the backprojection of the
+  256-cell runs, and it produces **961 tracking windows** rather than 225.
+  `src/main.c` carries a warning about exactly this: on this collect the same
+  chain "refused honestly at 225 windows and reported 0.183 Hz, prominence 29.9
+  at 961, off two crossings". The eligible-window count matters more than the
+  headline number here.
+- **The sub-looks are properly sampled for once.** `t_sap = 0.3 s` gives roughly
+  5.8 m azimuth resolution, which a 2.0 m cell oversamples. Every previous Giza
+  run carried the aliasing warning; this one earns it least.
+
+### Where this still departs from the paper
+
+Recorded so the run is not oversold as a replication:
+
+- **Patch shape.** They use 5 range x 51-131 azimuth pixels, scaled to target
+  velocity. `--win` is square, so this is 32 x 32. They report tracking quality
+  is "predominantly" set by the azimuth dimension and that too small a patch
+  underestimates the movement.
+- **Reference frame.** They correlate against the **middle** sub-aperture; the
+  reference here is frame 0 (`--reference first`). ResonarSat has no middle-frame
+  mode.
+- **No sinc interpolation.** Their `B = 20` upsampling of the velocity series has
+  no equivalent here. It affects amplitude, not frequency.
+- **The target.** Theirs is an isolated corner reflector on a shaker in an open
+  field, chosen to remove clutter. Ours is a pyramid.
+- **Velocities.** Their nine tests span 1.42 to 95.52 mm/s peak radial velocity,
+  and the smallest confirmed RMS radial displacement is 0.10 mm. Nothing
+  establishes that Khufu moves anywhere near that.
+
+## Command
+
+```sh
+resonarsat mmotion --cphd data/giza.cphd --rbins 4096 \
+    --at 29.979175,31.134186 --size 512 --cell 2.0 \
+    --subap uniform --overlap 0.4 --estimator correlation \
+    --n 182 --win 32 --coherence 0.4 --upsample 10 --null-trials 8 \
+    --shifts spot_n182_ov40.csv --out spot_n182_ov40
+```
+
+`--upsample 10` is the paper's `A = 10`. `--null-trials 8` is a first look; the
+shuffle is a *valid* null here, unlike in the phase runs, because a correlation
+observable reads each look independently and reordering does not change the
+per-look noise. That is the exemption written into
+`rs_warn_shuffle_null_on_phase()` today, and this is the case it exempts.
+
+## THE PREDICTION, recorded before the result
+
+**No detection, and the most likely form is an honest refusal rather than a
+spurious peak.**
+
+- **P9** `RS_ERR_RANGE` -- no window resolves motion above the quantisation
+  floor. `--upsample 10` puts that floor at 3 sigma of 1/10 px, i.e. 0.245 px,
+  four times coarser than the 1/40 px used by the patent-chain runs, which found
+  a largest excursion anywhere of 0.05 px. `--reference first` accumulates full
+  displacement rather than differencing across a lag, so excursions should be
+  larger than those runs saw -- but not, on any available evidence, by a factor
+  of five.
+- **P10** If it does report a peak, it comes from very few of the 961 windows,
+  and the fmin ladder relocates it, exactly as in
+  `2026-07-30-uniform-phase-khufu`. Watch the eligible count, not the prominence.
+- **P11** The 8-shuffle floor behaves itself this time: the shuffled prominences
+  should sit at a similar level to the measurement rather than 5x below it, since
+  correlation does not have the red-noise asymmetry that made the phase runs beat
+  their own shuffles.
+
+**What would falsify it:** a peak in a contiguous patch of at least four windows,
+clear of the lowest bins, surviving `--fmin`, above the shuffled floor, with
+per-window excursions comfortably above 0.245 px. That would be the first
+positive micro-motion result this project has produced, and it would need
+repeating at `--upsample 40` and against `--null-static` before being believed.
+
+**A note on what a null here does and does not mean.** Unlike the patent chain's
+null, a null at this operating point cannot be dismissed as a structural artefact
+of the method -- this configuration demonstrably measures 1-4 Hz vibration on a
+corner reflector with millimetre displacements. A null here is evidence about
+**Khufu**, or about the difference between a corner reflector and a limestone
+massif, and not about the processing. That makes it the most informative null
+this project could produce, which is why it was worth stopping a three-hour job
+to run it.
+
+The three `--shifts` series are stored gzipped, as in the sibling run: 961
+windows by 159-182 looks is 8-13 MB of text each. `gunzip -k` before pointing
+`shift_stats.py` or `freq_map.py` at them.
+
+## Result of the first attempt: nothing tracks at all
+
+```
+sub-apertures: 182 looks, dt 0.1799 s
+  observable band  f_max 2.78 Hz   AT sub-look resolution 5.58 m
+sub-pixel refinement: 1/10 px
+tracked 961 windows (31 x 31); 0 pass the 0.40 coherence mask
+  no window is coherent enough to carry a measurement.
+spectra: 92 bins, 0.0305 Hz resolution
+mmotion: value out of range (spectrum: no window resolved motion above the
+  0.2449 px quantisation floor (3 sigma of 1/10 px))
+```
+
+**P9 held exactly**, including the predicted 0.2449 px floor. But it held for a
+reason the prediction did not anticipate: not that the excursions were too small
+to clear the floor, but that **no window correlated at all**.
+
+From `spot_n182_ov40.csv`, over all 961 windows:
+
+| | value |
+|---|---|
+| tracking quality, median | 0.0505 |
+| tracking quality, maximum | **0.1080** |
+| windows at or above 0.4 | **0 of 961** |
+| windows at or above 0.2 | 0 of 961 |
+| windows at or above 0.1 | 3 of 961 |
+
+**A caution about the shift series in that CSV: it is identically zero in every
+window, and that is an artefact, not a measurement.** `src/core/microm.c:588`
+zeroes `disp_az`, `disp_rg`, `vel_los` and `disp_los` for any window failing the
+coherence mask -- deliberately, so an incoherent window contributes a flat
+spectrum instead of a confident-looking peak. Since all 961 failed, all 961 were
+zeroed. Nothing about the ground follows from those zeros.
+
+**An unmasked re-run of this configuration was started and abandoned** -- same
+parameters with `--coherence 0 --upsample 40 --null-trials 8` -- killed at 36
+minutes, during the eighth of nine tracking passes it did not need. No headline
+result was produced and none is claimed.
+
+**Its `--shifts` CSV is complete, though**, because `--shifts` is written after
+tracking and before the null trials, and 174,902 rows is exactly 961 windows x
+182 looks. So the diagnostic the run was for survived the kill:
+
+```
+alpha = 0.91%, unmasked:  quality median 0.0506, max 0.1082
+                          azimuth excursion median 31.975 px, max 33.000 px
+                          (the tracking window is 32 px)
+```
+
+The zeros in `spot_n182_ov40.csv` were the mask. Underneath it the tracker was
+producing peak-to-peak excursions of very nearly the full window width -- the
+same window-scale wander the corrected run below shows, and for the same reason.
+Both aperture fractions fail identically once the mask is removed; the mask was
+only hiding it at 0.91%.
+
+## The diagnosis: the aperture fraction was wrong, by a factor of five
+
+Reading Lotti et al., *Feasibility of micro-motion from SAR imagery for
+vibration-based SHM* (SHMII-13, DOI 10.3217/978-3-99161-057-1-142) -- the same
+Umbra campaign as Vattulainen, same shaker and LVDT -- names this failure
+directly:
+
+> When the aperture fraction becomes too small, the target may no longer appear
+> as a distinct feature, thus degrading the tracking performance. This imposes a
+> practical limit on how finely the aperture can be segmented, although this can
+> be mitigated by increasing the overlap.
+
+The aperture fraction `alpha = t_sap/t_a` is the parameter this run got wrong:
+
+| | `t_a` | `t_sap` | `alpha` |
+|---|---|---|---|
+| Lotti Test 1 | 6.04 s | 0.46 s | 7.6% |
+| Lotti Test 2 | 5.95 s | 0.27 s | 4.5% |
+| Lotti Test 3 | 14.70 s | 0.66 s | 4.5% |
+| **this run** | 32.869 s | 0.300 s | **0.91%** |
+
+The parameters here were derived by holding the *observation ratio* `eta` at 0.6
+and letting `alpha` fall where it would. It fell five to eight times below the
+validated range, each sub-look resolving 5.58 m, and the scene stopped
+correlating. That is the mechanism Lotti et al. describe, observed.
+
+**This also refines the criticism of `README.md` recorded in the sibling run.**
+The README's numbers were wrong -- the validated work uses a few dozen looks at
+23-49% overlap, not thousands at 90-99%. But its *mechanism* was right, and on a
+32.869 s dwell high overlap is not optional. Holding `alpha` at 5% means
+`t_sap = 1.64 s`, and the only way to still sample near 5 Hz is `Omega ~ 0.88`.
+Their short dwells bought adequate `f_s` at moderate overlap; this collect
+cannot. The two papers' own mitigation sentence says exactly this.
+
+## The corrected configuration
+
+```sh
+resonarsat mmotion --cphd data/giza.cphd --rbins 4096 \
+    --at 29.979175,31.134186 --size 512 --cell 1.0 \
+    --subap uniform --overlap 0.88 --estimator correlation \
+    --n 159 --win 32 --coherence 0 --upsample 40 --null-trials 8 \
+    --shifts alpha5_n159_ov88.csv --out alpha5_n159_ov88
+```
+
+```
+alpha 5.0%   t_sap 1.643 s   dt 0.1972 s
+f_s 5.07 Hz  f_max 2.54 Hz   sub-look azimuth resolution ~1.06 m
+N = 159      n_az 512 >= 2N = 318
+```
+
+`--null-trials` is deliberately **absent**, after being specified and abandoned
+twice. At `--upsample 40` with `--coherence 0`, every one of the 961 windows is
+tracked and sub-pixel refined, and the refinement cost is quadratic in the
+refinement window -- so 1/40 px costs roughly sixteen times 1/10 px per call.
+`--null-trials 8` then repeats that whole pass eight more times. The unmasked
+diagnostic below was killed at 36 minutes without producing output for exactly
+this reason, and the first attempt at this run repeated the error. A shuffled
+floor is only worth paying for once there is a peak to test; if this run produces
+one, the floor can be measured then.
+
+Three deliberate changes from the first attempt:
+
+- **`--cell 1.0`** rather than 2.0, because the sub-looks now resolve 1.06 m. This
+  is the first Giza run in this project whose tracking images are properly
+  sampled by the grid rather than aliased onto it.
+- **`--coherence 0`**, so the series are not zeroed and the quality distribution
+  can be inspected. Any threshold can be applied offline from the CSV, which the
+  first attempt's output made impossible.
+- **`--upsample 40`** rather than the paper's `A = 10`, because their targets
+  moved at 1.42-95.52 mm/s and a 1/10 px floor was ample for that. Nothing
+  suggests Khufu is in that range.
+
+### Prediction for the corrected run
+
+- **P12** Tracking quality rises substantially -- median well above 0.1, and a
+  usable number of windows above 0.4. This is the parameter the diagnosis says
+  was wrong, so if quality does not move, the diagnosis is wrong.
+- **P13** Still no detection. Quality is necessary, not sufficient; the validated
+  targets are corner reflectors moving at millimetres per second, and a limestone
+  massif is neither. Expect either `RS_ERR_RANGE` again -- now for the honest
+  reason, excursions below the floor rather than nothing to track -- or a peak
+  that the fmin ladder relocates.
+- **P14** If a peak does appear, the 8-shuffle floor is a valid test of it, unlike
+  in the phase runs.
+
+## Result of the corrected run: coherence doubles, and Khufu still does not track
+
+```
+sub-apertures: 159 looks, dt 0.1976 s
+  observable band  f_max 2.53 Hz   AT sub-look resolution 1.02 m
+sub-pixel refinement: 1/40 px
+tracked 961 windows (31 x 31); 961 pass the 0.00 coherence mask
+spectra: 80 bins, 0.0318 Hz resolution
+strongest peak in window 455: 0.064 Hz, prominence 25.4, quality 0.128,
+                              peak-to-peak velocity 278.3 mm/s
+  526 of 961 windows were eligible for selection
+  sub-aperture response 0.9820 (-0.2 dB) at an observation ratio of 0.10
+```
+
+### P12 half held: the diagnosis was right about the direction and wrong about the cure
+
+| | first attempt, `alpha` 0.91% | corrected, `alpha` 5.0% |
+|---|---|---|
+| tracking quality, median | 0.0505 | **0.1226** |
+| tracking quality, maximum | 0.1080 | **0.2439** |
+| windows at or above 0.4 | 0 of 961 | **0 of 961** |
+| windows at or above 0.3 | 0 of 961 | 0 of 961 |
+| windows at or above 0.2 | 0 of 961 | 24 of 961 |
+
+Raising the aperture fraction to the validated range roughly **doubled** the
+coherence, which is the prediction the diagnosis rested on and it held. It did
+not get the scene anywhere near trackable. Nothing reaches the 0.4 default mask
+and only 24 windows of 961 clear even 0.2.
+
+### P13 held, and the shift series says why
+
+```
+azimuth excursion, median   31.98 px      (the tracking window is 32 px)
+azimuth excursion, maximum  33.00 px
+windows above the 0.0612 px quantisation floor   961 of 961
+windows with exactly zero excursion                0 of 961
+```
+
+**The correlation peak is wandering across the entire patch.** A median
+peak-to-peak excursion of 31.98 pixels in a 32-pixel window is not a measurement
+of motion; it is a correlator that finds no match and puts the peak wherever
+noise is highest. Everything downstream of that is arithmetic on noise, including
+the reported "0.064 Hz, prominence 25.4, 278.3 mm/s" -- which is, once again, the
+second bin of the spectrum.
+
+This is a different failure from the first attempt, and the difference is the
+informative part. There, the mask zeroed every window and the series were
+identically zero by construction. Here nothing is masked, every window carries a
+series, every series clears the quantisation floor, and they are all garbage.
+The tracker has stopped declining and started producing.
+
+### What this run establishes
+
+**At the aperture fraction with LVDT-validated results behind it, Khufu does not
+correlate between sub-apertures.** That is a statement about the target, not
+about the parameters, and it is the first such statement this project has been
+able to make -- every earlier null was confounded by a configuration nobody had
+validated.
+
+Two supporting details make it hard to blame the processing:
+
+- **The displacement-averaging problem is gone.** Sub-aperture response is 0.9820,
+  which is -0.2 dB, at an observation ratio of 0.10. The mechanism that made the
+  patent chain structurally blind -- integer observation ratios, exact nulls --
+  does not apply anywhere in this configuration's band.
+- **The sub-looks are properly sampled for the first time.** 1.02 m azimuth
+  resolution on a 1.0 m grid, so the tracking images are neither aliased nor
+  smeared, unlike every previous Giza run.
+
+The remaining explanation is the scene. The validated campaigns track a corner
+reflector -- an engineered point scatterer with high contrast against an open
+field, deliberately sited to avoid clutter. Khufu is a 230 m limestone massif of
+distributed, self-similar scatterers whose sub-look speckle decorrelates between
+looks that share 88% of their bandwidth. A method demonstrated on the former does
+not transfer to the latter, and this run is the measurement of that gap rather
+than an argument about it.
+
+### What was not done
+
+`--null-trials` was dropped, so there is no shuffled floor here. It would have
+been valid for this observable -- correlation, not phase -- but a floor is a test
+of a peak, and with excursions at the window scale there is no peak to test. It
+is the obvious addition if any future configuration produces windows that
+actually correlate.

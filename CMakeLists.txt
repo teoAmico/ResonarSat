@@ -90,6 +90,7 @@ add_library(resonarsat_core STATIC
     src/core/coreg.c
     src/core/phaselink.c
     src/core/microm.c
+    src/core/ccd.c
     src/core/spectrum.c
     src/core/tomo.c
     src/core/simulate.c
@@ -150,6 +151,7 @@ set(RS_TESTS
     test_depth
     test_tracking
     test_nullmotion
+    test_ccd
     test_phaselink
     test_modelc
     test_cphd

@@ -425,7 +425,7 @@ just its noise, was not run here and is the one that should adjudicate.
 ### A THIRD PREDICTION, recorded before the static null
 
 `--null-static 8` was then run on A: eight simulated motionless collects built on
-this collect's own geometry, 1024 scatterers each, put through the identical
+this collect's own geometry, 400 scatterers each, put through the identical
 chain. `rs_null_static()` is the test the code's own comment calls the one "an
 overlapping decomposition cannot walk over the way it can walk over a shuffle",
 and it is the right adjudicator here precisely because it reproduces the
@@ -437,7 +437,7 @@ processing's artefacts rather than only its noise.
   -- and a world where nothing moves has all of those.
 
 The way this could come out otherwise, stated in advance so it is not
-rationalised afterwards: the simulated scene is 1024 discrete scatterers, not
+rationalised afterwards: the simulated scene is 400 discrete scatterers, not
 real clutter, so its per-look SNR may be far better than the pyramid's. Cleaner
 phase means less drift, and a static floor well *below* 60.3 would be a statement
 about the simulator's scene statistics, not a clean bill of health for the
@@ -499,7 +499,7 @@ without the 50.5 beside it would be the most misleading single line this run
 could produce.
 
 The alternative outcome flagged in advance -- a static floor far *below* the
-measurement, indicating only that the simulator's 1024 discrete scatterers are
+measurement, indicating only that the simulator's 400 discrete scatterers are
 cleaner than real clutter -- did not occur. The floor came out just under the
 measurement, which is the outcome that carries information.
 
@@ -518,6 +518,100 @@ noise from 0.052 to 1.878 rad -- 36-fold -- so it destroys far more than the tim
 ordering it is supposed to isolate, and any red series beats the roughened
 version of itself. `--null-static` is not fooled, because a motionless scene goes
 through the same overlap, the same unwrap and the same detrend.
+
+## B's static null
+
+Run after the above was committed, because B had been left with no static floor:
+its phase was saturated wrap in every window, and the reading recorded above was
+that there was nothing for a floor to adjudicate. That reasoning is not good
+enough. "Saturated" is a claim about *this* scene, and the way to test it is to
+put a motionless scene through the identical chain and see whether it saturates
+too.
+
+```sh
+resonarsat mmotion --cphd data/giza.cphd --rbins 4096 \
+    --at 29.979175,31.134186 --size 256 --cell 2.0 \
+    --subap pulse --overlap 0.9 --estimator phase \
+    --n 2048 --win 32 --coherence 0.4 --null-static 8
+```
+
+### A FOURTH PREDICTION, recorded before the result
+
+B's measurement is prominence 89.8 at 0.830 Hz, from a series pinned at lambda/2
+in every window. The static scene is 400 point scatterers with Rayleigh
+reflectivity over this collect's geometry -- discrete bright targets, no
+distributed clutter, so its per-look SNR is probably *better* than the real
+desert's.
+
+- **P7** The static floor lands close to 89.8 -- within a factor of about 1.5 --
+  and its trials report frequencies at the bottom of the band, as every red
+  series here has. Whether any single trial reaches 89.8 is close to a coin
+  flip and is not the interesting part.
+- **P8** The interesting part is what it implies about saturation. At 0.16 s per
+  look, phase noise per step is set by how much energy one look collects, and
+  400 bright scatterers collect more than desert does. So if the static floor
+  comes back *near* B's measurement, the wrap is a property of the chain at this
+  look count and no target on this collect would do better. If it comes back
+  well *below*, the wrap is a property of Khufu's backscatter, and a brighter
+  structure might not saturate -- which would make B's failure specific rather
+  than structural.
+
+**What would falsify both:** a static floor far below 89.8 *and* trials reporting
+frequencies spread across the 31 Hz band rather than bunched at the bottom. That
+would mean the motionless chain produces a white spectrum, that B's red one came
+from the scene, and that the saturation reading is wrong.
+
+`--null-static` reports prominences only, not the per-trial shift series, so it
+cannot measure the simulated scene's peak-to-peak directly. P8 is therefore
+inferred from the floor rather than measured, and a direct test would need a
+static collect written to disk and put through `mmotion --shifts` separately.
+
+### Result: ABANDONED after one trial of eight
+
+Stopped deliberately, not because it failed. P7 and P8 stand recorded and
+unanswered, and this section exists so that a prediction with no result cannot
+quietly disappear.
+
+**Why it was stopped.** Two reasons, and the runtime is the weaker one.
+
+1. **The test could not answer the question it was run for.** As noted when it
+   was launched, `--null-static` reports prominences only, never the per-trial
+   shift series, so it cannot measure whether the *simulated* scene saturates.
+   P8 -- is the wrap a property of the chain or of Khufu's backscatter? -- would
+   have been inferred from a floor rather than measured. Three hours for an
+   inference that would still need hedging.
+2. **B needs no null to be disqualified.** A null floor asks whether a
+   measurement exceeds what a motionless world gives. B has no measurement to
+   compare: median peak-to-peak displacement pinned at exactly lambda/2, median
+   largest phase step 6.226 rad, in all 178 windows passing coherence. That is
+   the arithmetic of a phase uniform on [-pi, pi], and it is already conclusive.
+
+Reading Vattulainen et al. (2026) in the middle of the run also made B look like
+the wrong question. Their nine ground-truth tests operate at **26-81
+sub-apertures and 23-49% overlap with correlation tracking**. B's 2048 looks at
+0.9 overlap with a phase estimator was a construction of this project's to reach
+31 Hz, not a configuration anyone has validated. The successor run is
+`runs/giza/2026-07-30-validated-spot-khufu`.
+
+**The one trial that did complete**, recorded because it exists:
+
+```
+  static trial 1/8: prominence 0.0 at 0.031 Hz
+```
+
+**Do not read this as evidence against saturation.** Prominence 0.0 is what
+`rs_null_static()` stores when `rs_spectrum_best_window()` returns
+`RS_ERR_RANGE`, i.e. when *no window was eligible at all*. The simulated scene is
+400 point scatterers spread over the grid extent, and `mmotion`'s own `--coherence`
+help says isolated point targets on an otherwise empty scene score below 0.4 even
+when tracking perfectly. The overwhelmingly likely reading is that the 0.4
+coherence mask emptied the simulated scene, not that a motionless world produced
+a clean spectrum. One trial, with a confound, is not a floor.
+
+Anyone resuming this should either drop the mask to `--coherence 0` for the
+static trials or give the simulator enough scatterers to look like clutter. Both
+change what the floor means, which is itself worth thinking about before
+quoting a number from it.
 
 ### Not done in this run
 
