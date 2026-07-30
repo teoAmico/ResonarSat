@@ -1,0 +1,35 @@
+note: Capella product -- its signal does not follow its declared SGN=+1, so the
+      FX-to-delay transform is inverted to match Capella's own reference reader.
+      Without this the image is mirrored in range.
+cphd: skipped 8 vector(s) flagged invalid and 0 with non-finite geometry, of 335149
+warning: grid cell 2.000 m is coarser than the 0.051 m azimuth
+         resolution this collect supports. The image will alias:
+         each scatterer gains ghost peaks that resemble real
+         targets. Use --cell 0.051 or finer, or treat the result
+         as deliberately multi-looked.
+--no-optimize: unoptimised reference mode.
+  correlation peak search  WHOLE zero-padded surface, global maximum,
+                           instead of one pixel about the integer peak.
+                           This is the only change that can move a number.
+  backprojection           single-threaded, ascending cell order. The
+                           samples are BITWISE IDENTICAL to a threaded run:
+                           each cell accumulates privately over pulses in
+                           chronological order and no accumulator is shared,
+                           so there is no threading drift here to remove.
+                           This half is a reproducibility check, not a fix.
+  tracking loop            serial, so window visitation order is fixed.
+                           Also cannot change a result; windows are
+                           independent.
+  Measured cost: the exhaustive search is 1.7-3.2x the optimised one per
+  call (2.5x at these defaults), and running serially costs about 4x more
+  on eight cores. Single digits overall, not orders of magnitude -- this
+  is affordable on a full-scale scene.
+  A result from this mode is a second measurement by a slower route, to be
+  compared with the first -- not a more trustworthy one. Neither passes a
+  null test alone.
+subap route 'paper': focusing the full aperture first ...
+mmotion: value out of range (spectrum: no window resolved motion above the 0.061225 px quantisation floor (3 sigma of 1/40 px); the scene may hold no detectable motion, or the sub-pixel refinement may be too coarse for the excursion present)
+  No frequency is reported because none is supported by the
+  data, which is a different statement from finding none.
+  Raise --upsample to resolve a smaller excursion, or check
+  with --shifts whether the series moves at all.

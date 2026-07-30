@@ -1,0 +1,7 @@
+--at 29.979175,31.134186 resolves to --offset -152,-552 in this product's image plane
+sub-apertures: 128 looks, dt 0.1284 s
+  observable band  f_max 3.89 Hz   AT sub-look resolution 0.10 m
+sub-pixel refinement: 1/40 px (default 1/10 azimuth, 1/20 range)
+tracked 225 windows (15 x 15); 225 pass the 0.00 coherence mask
+wrote runs/giza/2026-07-30-no-optimize-khufu/khufu_n128.csv (225 windows x 128 looks, pre-spectrum)
+spectra: 65 bins, 0.0608 Hz resolution
