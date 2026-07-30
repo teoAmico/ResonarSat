@@ -55,7 +55,14 @@ past its input to find out what it is holding.
         |  rs_subaperture_from_cphd() or rs_subaperture_split()
         v
    rs_subap_stack_t   N images of the same ground at different instants,
-        |             with the time between them. This is the film.
+        |  \          with the time between them. This is the film.
+        |   \
+        |    \  rs_ccd_locate()
+        |     v
+        |    rs_ccd_t        one map: where in the scene something changed
+        |                    between consecutive sub-apertures. A branch, not
+        |                    a link in the chain — it answers "where", not
+        |                    "how much", and nothing downstream consumes it.
         |
         |  rs_microm_track()
         v
@@ -126,8 +133,9 @@ vendor it was written against.
 | `coreg.c` | sub-pixel shift between two complex patches |
 | `phaselink.c` | split-band phase linking across a whole stack |
 | `microm.c` | per-window tracking; owns the estimator choice |
+| `ccd.c` | scale-invariant change detection over a sub-aperture stack |
 | `spectrum.c` | windowed periodograms, dominant frequency, prominence |
-| `tomo.c` | the four depth models and their solvers |
+| `tomo.c` | the four depth models and their solvers, and the alignment null |
 | `simulate.c` | synthetic phase history over a real collect's geometry |
 
 Backprojection is chosen over frequency-domain focusing because it makes no
@@ -138,6 +146,23 @@ the sub-aperture stage form its looks by calling it repeatedly.
 
 The dependency graph is shallow and acyclic. Core modules depend on `fft` and
 `geom`; nothing in core depends on `readers`, `raster` or `main`.
+
+`ccd.c` is the one stage that is not a link in the chain. It consumes the
+sub-aperture stack and produces a map, and nothing consumes the map — it answers
+"where in this scene did something change", not "by how much and at what
+frequency". It exists because every measurement in the chain sweeps hundreds of
+windows with no prior on where a peak should be, and the number of tries is
+itself a source of peaks. It is also the one stage that does not depend on the
+tracker succeeding, which matters on scenes where the tracker does not.
+
+Both stages that make a claim now carry a null test built for that claim, and
+the two are deliberately different instruments. `rs_null_static()` and
+`rs_shuffle_looks()` bound the micro-motion stage; `rs_tomo_alignment_null()`
+bounds the depth stage by circularly shifting each window's profile, which holds
+every per-window artefact fixed and destroys only the agreement between windows.
+Using the wrong one of these is not a minor error — a shuffled null passed a
+phase measurement at p = 0.03 that a static null then placed within 1% of a
+motionless scene. See `runs/giza/2026-07-30-uniform-phase-khufu/`.
 
 ### Utilities — `src/util/`
 
@@ -223,7 +248,7 @@ arguments prints full usage.
 | `feasibility` | acquisition parameters | the observable vibration band and its cost in resolution |
 | `info` | any supported file | geometry and timing; validates the file |
 | `focus` | `rs_cphd_t` | a focused image, written as PNG or PGM |
-| `mmotion` | `rs_cphd_t` | vibration spectra per window, and null-test results |
+| `mmotion` | `rs_cphd_t` | vibration spectra per window, null-test results, and with `--ccd-out` a change-detection map |
 | `tomo` | `rs_cphd_t` | depth profiles, a section image, a float32 cube, and with `--geocode` a CSV of window centres in latitude and longitude |
 | `sweep` | `rs_cphd_t` | how recovered depth responds to the assumed constants |
 

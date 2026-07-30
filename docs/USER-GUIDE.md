@@ -146,6 +146,45 @@ or `--raw out.f32` to write the amplitudes themselves.
 
 ---
 
+## Step 3½ — narrow down *where* to measure
+
+Optional, and worth it on a scene where you do not already know which object you
+care about.
+
+```sh
+resonarsat mmotion --cphd data/scene.cphd --offset 1700,-1700 \
+    --size 512 --cell 1.0 --n 159 --overlap 0.88 \
+    --ccd-out scene
+```
+
+This runs a change detector over consecutive frames and writes a map. It answers
+"where in this scene did something change", not "at what frequency" — a
+different question from everything else here, and one that **does not need the
+tracker to succeed**, because it never tracks anything.
+
+Its useful property is that it ignores brightness. A bright but stationary
+target scores the same as a dim one: only a change in the *structure* of the
+signal counts, not its level. That is the false alarm an amplitude-based check
+cannot suppress.
+
+Read it with two numbers in mind:
+
+- **1.0 is the no-change value.** The map's minimum tells you more than its
+  maximum. On a synthetic scene with one vibrating target, the background sits at
+  1.0 and only the target rises. On real distributed clutter it will not: at
+  Giza the *minimum over the entire map* was 7.35, because sub-look speckle
+  decorrelates everywhere and decorrelation is a change.
+- **A map has no threshold.** The method it comes from implements none. Compare
+  against a motionless scene through the same chain before reading structure into
+  a picture, and check where the extremes actually sit — at Giza the top 0.1% of
+  pixels formed a five-column stripe spanning the image, which is a processing
+  artefact and not a target.
+
+`--ccd-win` sets the sliding window (default 5) and `--ccd-loading` the noise
+floor. The map is written as a PNG and a float32 cube with a sidecar.
+
+---
+
 ## Step 4 — measure the motion
 
 ```sh
@@ -173,9 +212,31 @@ Reading the output:
 `--n` is the number of frames and `--overlap` how much consecutive frames share.
 Together they set both the frequency reach and the sharpness of each frame.
 
-High overlap is normal and useful. It raises the sampling rate — and therefore
-the frequency reach — without shortening each frame, so resolution is preserved.
-Values of 0.9 to 0.99 are ordinary.
+High overlap raises the sampling rate — and therefore the frequency reach —
+without shortening each frame, so resolution is preserved. But **overlap is the
+second thing to choose, not the first.**
+
+**Set the frame length first.** The quantity that decides whether anything tracks
+at all is the *aperture fraction*: the length of one frame divided by the whole
+acquisition. Published work validated against ground truth operates at **3 to 8
+percent**. Below that the target stops being a distinct feature in each frame and
+the tracking collapses — quietly, with a fully populated result.
+
+That is measured, not theoretical. On a 32.9 s Giza collect, frames of 0.30 s
+(0.91%) gave a maximum tracking quality of 0.108 across 961 windows, with nothing
+above the 0.4 mask. Frames of 1.64 s (5.0%) roughly doubled the quality and still
+nothing reached 0.4 — see `runs/giza/2026-07-30-validated-spot-khufu/`.
+
+**Then buy the sampling rate with overlap.** Frame length and sampling rate pull
+against each other, and overlap is what separates them. On a long acquisition
+this forces high overlap: holding 5% on a 32.9 s collect means 1.64 s frames, and
+sampling near 5 Hz then needs an overlap around 0.88. On the 6–15 s acquisitions
+the validated work used, 23–49% was enough for the same aperture fraction.
+
+**The sampling rule.** The interval between frame centres must be well under the
+period of the vibration you are looking for — a quarter of it is the value the
+published work uses. Sampling more slowly than the target vibrates produces a
+complete, plausible, entirely wrong result.
 
 If you want a specific frame length in seconds, work back from the pulse rate:
 frames of `T` seconds need `T x PRF` pulses each, and a step of `s` seconds
@@ -317,9 +378,13 @@ resonarsat tomo --cphd data/scene.cphd --offset 1700,-1700 \
     --size 256 --grid-cell 2.0 --n 512 --overlap 0.99 \
     --subap paper --estimator phase --y los \
     --velocity 3000 --frequency 200 --model A \
-    --cell 3.2 --depth 70.4 \
+    --cell 3.2 --depth 70.4 --null-align 200 \
     --section 24 --section-out tomogram.png --out cube.f32
 ```
+
+`--null-align` is in that line deliberately: it is the depth stage's null test,
+it costs nothing next to the focusing, and a tomogram exported without it has
+nothing to say about whether its windows agree. See below.
 
 `--velocity` and `--frequency` have no defaults and must be supplied. They are
 assumptions about the ground, not measurements, and together they set the entire
@@ -467,6 +532,39 @@ resonarsat tomo --cphd data/scene.cphd --offset 1700,-1700 \
 The geocode export requires the input product to carry a valid scene plane. If
 that metadata is absent, exact tomography can still run, but block 11 cannot be
 written.
+
+### The depth stage's own null test
+
+The nulls in Step 5 test the *motion* measurement. This one tests the depth
+claim, and it is a different instrument because the depth claim is a different
+claim.
+
+```sh
+resonarsat tomo ... --null-align 200
+```
+
+A tomogram is a stack of per-window depth profiles. Every window's profile has
+peaks in it whatever the ground does — that is what a steering matrix and a
+window function produce. The only thing that distinguishes a structure at depth
+from each window's own artefacts is whether the windows **agree** about which
+depth.
+
+So `--null-align` circularly shifts each window's profile by an independent
+random amount and restacks. Every profile is preserved exactly — same peaks,
+same widths, same sidelobes — and the only thing destroyed is the agreement. If
+the stacked contrast survives, the windows independently picked the same depth.
+If it collapses to the null, the tomogram was showing you the average shape of
+per-window artefacts.
+
+**Do not substitute a sub-look shuffle here.** Shuffling rebuilds every profile
+as well as their alignment, so it tests the whole chain at once and cannot say
+which half carried the result — and it is measurably too weak: an independent
+reproduction of this method reports a wrong-shallow-depth case with high contrast
+that the shuffle does not catch.
+
+Clearing this null is **necessary and not sufficient**. The depth axis is still
+scaled by the assumed velocity and frequency, which nothing measures. Run the
+next check too.
 
 ### The one check that costs nothing
 
