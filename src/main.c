@@ -695,7 +695,11 @@ static resonarsat_status_t rs_build_subaps(const rs_cphd_t *c, const rs_grid_t *
     if (st != RS_OK) return st;
 
     fprintf(stderr, "subap route '%s': focusing the full aperture first ...\n", route);
-    st = rs_focus_backproject(c, grid, 0, c->n_pulse, &full);
+    {
+        const rs_focus_opts_t fopts = { .single_thread = sp->single_thread,
+                                        .range_taps = sp->range_taps };
+        st = rs_focus_backproject_opts(c, grid, 0, c->n_pulse, &fopts, &full);
+    }
     if (st != RS_OK) { rs_slc_free(&full); return st; }
 
     st = rs_subaperture_split(&full, sp, stack);
@@ -1263,6 +1267,10 @@ static int rs_cmd_mmotion(int argc, char **argv)
     sp.n_looks = (size_t)rs_opt_double(argc, argv, "--n", 16);
     sp.overlap = rs_opt_double(argc, argv, "--overlap", 0.40);
     sp.single_thread = no_optimize;
+    sp.range_taps = (int)rs_opt_double(argc, argv, "--range-taps", 0.0);
+    if (sp.range_taps >= 4) {
+        printf("range interpolation: %d-tap windowed sinc\n", sp.range_taps);
+    }
     const int ref_mode = rs_parse_reference(argc, argv, &sp);
     if (ref_mode < 0) { rs_cphd_free(&c); return 1; }
     const char *subap_route = rs_opt(argc, argv, "--subap");

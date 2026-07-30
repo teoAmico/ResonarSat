@@ -380,6 +380,41 @@ looks that share 88% of their bandwidth. A method demonstrated on the former doe
 not transfer to the latter, and this run is the measurement of that gap rather
 than an argument about it.
 
+## Was the correlation failure our own interpolator? No.
+
+Range interpolation in `rs_focus_backproject()` was linear between natively
+spaced bins. NGA's reference backprojector zero-pads eightfold before doing the
+same thing, on the stated grounds that linear interpolation otherwise "causes
+cross-range artifacts" (MATLAB_SAR, `Processing/IFP/BP/bpBasic.m`).
+
+That raised a specific hypothesis about this run rather than a general worry.
+The interpolation error depends on the fractional bin position; that position
+varies with slant range; different sub-apertures use different pulses and so
+sit at different fractional positions. So the error differs BETWEEN LOOKS, which
+is a mechanism for look-to-look decorrelation -- and look-to-look decorrelation
+is exactly what failed here.
+
+Re-run with an 8-tap Hann-windowed sinc, identical in every other parameter:
+
+| | linear | 8-tap sinc |
+|---|---|---|
+| tracking quality, median | 0.1226 | **0.1211** |
+| tracking quality, maximum | 0.2439 | **0.2321** |
+| windows at or above 0.2 | 24 | 22 |
+| windows at or above 0.4 | 0 | 0 |
+| azimuth excursion, median | 31.975 px | **31.975 px** |
+
+**The hypothesis is dead.** Coherence does not improve; it is marginally lower,
+within noise. The median excursion is identical to three decimals -- the
+correlation peak still wanders the full 32-pixel window.
+
+This strengthens the null rather than qualifying it. The failure to correlate at
+Khufu is not an artefact of this project's range interpolation, and one more
+candidate explanation is retired. What the wider kernel does buy, measured
+separately on a focused patch of the same collect, is about 1.4 dB of amplitude
+and no change in image contrast -- so it is real, modest, and irrelevant to any
+conclusion here. It stays off by default.
+
 ## The CCD locator on the same stack
 
 Run after `rs_ccd_locate()` was implemented and wired to `mmotion` as

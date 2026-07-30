@@ -140,6 +140,12 @@ typedef struct {
      * there in the tomogram sidecar, so a product says which schedule produced
      * it. */
     int    single_thread;
+
+    /* Range interpolator width, passed straight to rs_focus_opts_t.range_taps
+     * by rs_subaperture_from_cphd() and by the CLI's full-aperture focus. 0
+     * keeps the linear default. See rs_focus_opts_t for what it corrects and
+     * what it does not. */
+    int    range_taps;
 } rs_subap_params_t;
 
 /* A stack of sub-look images sharing one geometry.

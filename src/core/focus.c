@@ -141,6 +141,39 @@ resonarsat_status_t rs_focus_backproject_opts(const rs_cphd_t *cphd,
     if (taps > 16) taps = 16;
     const int half_taps = taps / 2;
 
+    /* Kernel coefficients, precomputed on a fine grid of sub-bin positions.
+     *
+     * Evaluating sin() twice per tap per pulse per cell made the wider kernel
+     * three to four times the cost of the linear one, which put the measurement
+     * it exists for out of reach on a real collect. The kernel depends only on
+     * the fractional bin position, so it is tabulated once here and looked up.
+     *
+     * RS_TAP_STEPS positions quantise that fraction to 1/2048 of a bin. The
+     * error that introduces is bounded by the kernel's slope, of order pi, so
+     * about -56 dB on the interpolated sample -- three orders below the 1.4 dB
+     * the kernel is correcting. It does NOT touch the phase term, which is
+     * computed from the exact range independently of this table. */
+    double *ktab = NULL;
+    const int RS_TAP_STEPS = 2048;
+    if (taps > 0) {
+        ktab = malloc((size_t)(RS_TAP_STEPS + 1) * (size_t)taps * sizeof *ktab);
+        if (!ktab) return RS_ERR_ALLOC;
+        for (int q = 0; q <= RS_TAP_STEPS; q++) {
+            const double f = (double)q / (double)RS_TAP_STEPS;
+            for (int t = -half_taps + 1; t <= half_taps; t++) {
+                const double x = f - (double)t;
+                double w;
+                if (fabs(x) < 1e-12) {
+                    w = 1.0;
+                } else {
+                    const double sx = sin(M_PI * x) / (M_PI * x);
+                    w = sx * 0.5 * (1.0 + cos(M_PI * x / (double)half_taps));
+                }
+                ktab[(size_t)q * (size_t)taps + (size_t)(t + half_taps - 1)] = w;
+            }
+        }
+    }
+
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) if (!single_thread)
 #else
@@ -187,22 +220,16 @@ resonarsat_status_t rs_focus_backproject_opts(const rs_cphd_t *cphd,
                  * on the option, which is worse than a documented seam. */
                 s = row[b] * (float)(1.0 - frac) + row[b + 1] * (float)frac;
             } else {
-                /* Hann-windowed sinc. The window is on the kernel's own support
-                 * so the taps fall to zero at the ends rather than being cut,
-                 * which is what keeps the stopband from ringing. */
+                /* Hann-windowed sinc, from the table above. The window is on the
+                 * kernel's own support so the taps fall to zero at the ends
+                 * rather than being cut, which keeps the stopband from ringing. */
+                const double *w = ktab + (size_t)(int)(frac * (double)RS_TAP_STEPS + 0.5)
+                                         * (size_t)taps;
+                const float complex *base = row + (size_t)((long)b - half_taps + 1);
                 double acc_r = 0.0, acc_i = 0.0;
-                for (int t = -half_taps + 1; t <= half_taps; t++) {
-                    const double x = frac - (double)t;
-                    double w;
-                    if (fabs(x) < 1e-12) {
-                        w = 1.0;
-                    } else {
-                        const double sx = sin(M_PI * x) / (M_PI * x);
-                        w = sx * 0.5 * (1.0 + cos(M_PI * x / (double)half_taps));
-                    }
-                    const float complex v = row[(size_t)((long)b + t)];
-                    acc_r += w * (double)crealf(v);
-                    acc_i += w * (double)cimagf(v);
+                for (int t = 0; t < taps; t++) {
+                    acc_r += w[t] * (double)crealf(base[t]);
+                    acc_i += w[t] * (double)cimagf(base[t]);
                 }
                 s = (float)acc_r + (float)acc_i * I;
             }
@@ -218,6 +245,8 @@ resonarsat_status_t rs_focus_backproject_opts(const rs_cphd_t *cphd,
 
         img->data[(size_t)cell] = (float)acc_re + (float)acc_im * I;
     }
+
+    free(ktab);
 
     /* Fill in the geometry the focused image inherits from the collection.
      *

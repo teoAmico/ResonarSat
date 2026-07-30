@@ -163,11 +163,23 @@ int main(void)
      * cleanup. That distinction is why the wider kernel is an option rather
      * than the default -- see rs_focus_opts_t.
      *
-     * What this case can check is that the two kernels agree about WHERE the
-     * energy is, which is the property any interpolator must have and the one a
-     * bug would break. The simulator's range response is a Gaussian, so it is
-     * comfortably oversampled and the amplitude difference here is far smaller
-     * than on real critically sampled data. */
+     * WHAT THIS FIXTURE CANNOT CHECK, and a trap worth recording. The
+     * simulator deposits a GAUSSIAN range response of sigma = range_res/2.355,
+     * sampled at 'dr'. At the defaults that is 0.425 m sampled every 0.5 m --
+     * 0.85 samples per sigma -- so the fixture's range signal is ALIASED. Sinc
+     * interpolation assumes a band-limited signal and faithfully reconstructs
+     * whatever is there, aliasing included, where linear interpolation
+     * incidentally low-passes it. On this fixture the wider kernel therefore
+     * raises total energy while LOWERING the peak, at 256 cells: peak 265.9,
+     * 228.3, 161.2 for 0, 4 and 8 taps against total power 1.32e6, 1.44e6,
+     * 1.43e6. On real range-compressed data, band-limited by the chirp, every
+     * statistic including the peak rose instead.
+     *
+     * So an amplitude assertion here would pin the simulator's aliasing rather
+     * than the interpolator's quality, and would have to be inverted against
+     * what real data does. What the fixture does support is agreement about
+     * WHERE the energy is, which any interpolator must give and a bug would
+     * break. */
     RS_CASE("the wider range kernel agrees with linear on target position");
     {
         const rs_sim_tgt_t tgt_one = { 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0 };
@@ -193,12 +205,23 @@ int main(void)
             if (ml > al) { al = ml; pl = i; }
             if (ms > as) { as = ms; ps = i; }
         }
-        printf("    peak cell: linear %zu, sinc %zu; amplitude %.4g vs %.4g "
-               "(%+.2f dB)\n", pl, ps, al, as, 20.0 * log10(as / al));
+        double el = 0.0, es = 0.0;
+        for (size_t i = 0; i < g.n_x * g.n_y; i++) {
+            const double ml = cabs(lin.data[i]), ms = cabs(sinc.data[i]);
+            el += ml * ml;
+            es += ms * ms;
+        }
+        printf("    peak cell: linear %zu, sinc %zu; amplitude %.4g vs %.4g; "
+               "total power %+.2f dB\n", pl, ps, al, as,
+               10.0 * log10(es / el));
 
-        /* Same cell, and the wider kernel must not lose energy. */
+        /* Both kernels must agree about where the target is. */
         RS_CHECK(pl == ps);
-        RS_CHECK(as >= al * 0.999);
+
+        /* And the wider kernel must not throw energy away. Total power, not
+         * peak amplitude: on this fixture the peak legitimately falls, for the
+         * reason in the comment above. */
+        RS_CHECK(es >= el * 0.99);
 
         rs_slc_free(&lin);
         rs_slc_free(&sinc);

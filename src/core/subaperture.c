@@ -28,6 +28,7 @@ void rs_subap_params_default(rs_subap_params_t *params)
      * rs_microm_params_default(), where omitting the equivalent line produced a
      * tracker that silently changed method between runs. */
     params->single_thread = 0;
+    params->range_taps = 0;
 }
 
 /* Gather one range column of an image into a contiguous buffer, so the azimuth
@@ -547,7 +548,8 @@ resonarsat_status_t rs_subaperture_from_cphd(const struct rs_cphd *cphd_in,
         resonarsat_status_t st = rs_slc_alloc(&stack->look[i], grid->n_x, grid->n_y);
         if (st != RS_OK) { rs_subap_stack_free(stack); return st; }
 
-        const rs_focus_opts_t fopts = { .single_thread = params->single_thread };
+        const rs_focus_opts_t fopts = { .single_thread = params->single_thread,
+                                        .range_taps = params->range_taps };
         st = rs_focus_backproject_opts(cphd, grid, start, per, &fopts, &stack->look[i]);
         if (st != RS_OK) { rs_subap_stack_free(stack); return st; }
 
