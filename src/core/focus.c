@@ -134,6 +134,13 @@ resonarsat_status_t rs_focus_backproject_opts(const rs_cphd_t *cphd,
      * the only thing that differs. */
     const int single_thread = opts && opts->single_thread;
 
+    /* Interpolator width. Anything below 4 is the historical two-tap linear
+     * path; see rs_focus_opts_t for why the wider kernel exists. */
+    int taps = opts ? opts->range_taps : 0;
+    if (taps < 4) taps = 0;
+    if (taps > 16) taps = 16;
+    const int half_taps = taps / 2;
+
 #ifdef _OPENMP
 #pragma omp parallel for schedule(static) if (!single_thread)
 #else
@@ -170,7 +177,35 @@ resonarsat_status_t rs_focus_backproject_opts(const rs_cphd_t *cphd,
             const double frac = fbin - (double)b;
 
             const float complex *row = cphd->signal + p * n_rbin;
-            const float complex s = row[b] * (float)(1.0 - frac) + row[b + 1] * (float)frac;
+            float complex s;
+            if (taps == 0 ||
+                b < (size_t)half_taps || b + (size_t)half_taps >= n_rbin) {
+                /* Linear, and also the fallback within half a kernel of the
+                 * swath edge, where the wider kernel would read outside the
+                 * collected data. Truncating the kernel there instead would
+                 * taper the edge of every image by a different amount depending
+                 * on the option, which is worse than a documented seam. */
+                s = row[b] * (float)(1.0 - frac) + row[b + 1] * (float)frac;
+            } else {
+                /* Hann-windowed sinc. The window is on the kernel's own support
+                 * so the taps fall to zero at the ends rather than being cut,
+                 * which is what keeps the stopband from ringing. */
+                double acc_r = 0.0, acc_i = 0.0;
+                for (int t = -half_taps + 1; t <= half_taps; t++) {
+                    const double x = frac - (double)t;
+                    double w;
+                    if (fabs(x) < 1e-12) {
+                        w = 1.0;
+                    } else {
+                        const double sx = sin(M_PI * x) / (M_PI * x);
+                        w = sx * 0.5 * (1.0 + cos(M_PI * x / (double)half_taps));
+                    }
+                    const float complex v = row[(size_t)((long)b + t)];
+                    acc_r += w * (double)crealf(v);
+                    acc_i += w * (double)cimagf(v);
+                }
+                s = (float)acc_r + (float)acc_i * I;
+            }
 
             /* Undo the propagation phase, against whichever reference the data
              * were recorded on (see rs_cphd_t.phase_ref_srp). */

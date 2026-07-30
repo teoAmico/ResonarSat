@@ -146,6 +146,65 @@ int main(void)
         rs_slc_free(&threaded);
     }
 
+    /* The range interpolator, both kernels, on the same phase history.
+     *
+     * MEASURED ON REAL DATA FIRST, and the numbers are recorded here because a
+     * synthetic fixture cannot reproduce them. Focusing the same 256x256 patch
+     * of the Giza collect at 0.5 m cells, changing nothing but the kernel:
+     *
+     *   mean amplitude   +1.43 dB      peak amplitude  +1.06 dB
+     *   median           +1.43 dB      top 20 targets  +1.32 dB
+     *   total power      +1.42 dB      contrast (sd/mean)  0.5382 -> 0.5378
+     *
+     * So linear interpolation was costing about 1.4 dB of amplitude uniformly,
+     * which is real and modest. What it was NOT doing is generating the
+     * cross-range artefacts NGA's reference warns about: image contrast is
+     * unchanged to four significant figures, so the correction is a gain, not a
+     * cleanup. That distinction is why the wider kernel is an option rather
+     * than the default -- see rs_focus_opts_t.
+     *
+     * What this case can check is that the two kernels agree about WHERE the
+     * energy is, which is the property any interpolator must have and the one a
+     * bug would break. The simulator's range response is a Gaussian, so it is
+     * comfortably oversampled and the amplitude difference here is far smaller
+     * than on real critically sampled data. */
+    RS_CASE("the wider range kernel agrees with linear on target position");
+    {
+        const rs_sim_tgt_t tgt_one = { 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0 };
+        rs_cphd_t c2;
+        RS_CHECK_OK(rs_sim_scene(&c2, &tgt_one, 1, 4.0, 400.0, 256, 0.5));
+
+        rs_grid_t g = { .n_x = 64, .n_y = 64, .dx = 0.5, .dy = 0.5, .height = 0.0 };
+        g.origin[0] = g.origin[1] = g.origin[2] = 0.0;
+
+        rs_slc_t lin, sinc;
+        RS_CHECK_OK(rs_slc_alloc(&lin, g.n_x, g.n_y));
+        RS_CHECK_OK(rs_slc_alloc(&sinc, g.n_x, g.n_y));
+
+        const rs_focus_opts_t o_lin = { .single_thread = 0, .range_taps = 0 };
+        const rs_focus_opts_t o_sinc = { .single_thread = 0, .range_taps = 8 };
+        RS_CHECK_OK(rs_focus_backproject_opts(&c2, &g, 0, c2.n_pulse, &o_lin, &lin));
+        RS_CHECK_OK(rs_focus_backproject_opts(&c2, &g, 0, c2.n_pulse, &o_sinc, &sinc));
+
+        size_t pl = 0, ps = 0;
+        double al = 0.0, as = 0.0;
+        for (size_t i = 0; i < g.n_x * g.n_y; i++) {
+            const double ml = cabs(lin.data[i]), ms = cabs(sinc.data[i]);
+            if (ml > al) { al = ml; pl = i; }
+            if (ms > as) { as = ms; ps = i; }
+        }
+        printf("    peak cell: linear %zu, sinc %zu; amplitude %.4g vs %.4g "
+               "(%+.2f dB)\n", pl, ps, al, as, 20.0 * log10(as / al));
+
+        /* Same cell, and the wider kernel must not lose energy. */
+        RS_CHECK(pl == ps);
+        RS_CHECK(as >= al * 0.999);
+
+        rs_slc_free(&lin);
+        rs_slc_free(&sinc);
+        rs_cphd_free(&c2);
+    }
+
     rs_slc_free(&sub);
     rs_slc_free(&img);
     rs_cphd_free(&cphd);

@@ -799,7 +799,7 @@ static int rs_cmd_focus(int argc, char **argv)
                "                       [--size N] [--cell M] [--offset X,Y | --at LAT,LON]\n"
                "                       [--pulse-start N --pulse-count N] [--raw FILE]\n"
                "                       [--rbins N] [--max-pulses N] [--pulse-stride N]\n"
-               "                       [--no-optimize]\n"
+               "                       [--range-taps N] [--no-optimize]\n"
                "\n"
                "--rbins reads a window of range bins and --max-pulses caps how many\n"
                "pulses are READ, not merely used. A large collect will not fit in\n"
@@ -866,8 +866,13 @@ static int rs_cmd_focus(int argc, char **argv)
            p_count, grid.n_y, grid.n_x, cell);
 
     const rs_focus_opts_t fopts = {
-        .single_thread = rs_opt_no_optimize(argc, argv)
+        .single_thread = rs_opt_no_optimize(argc, argv),
+        .range_taps = (int)rs_opt_double(argc, argv, "--range-taps", 0.0)
     };
+    if (fopts.range_taps >= 4) {
+        printf("range interpolation: %d-tap windowed sinc "
+               "(default is 2-tap linear)\n", fopts.range_taps);
+    }
     st = rs_focus_backproject_opts(&c, &grid, p_start, p_count, &fopts, &img);
     if (st != RS_OK) {
         rs_report_error("focus", st);

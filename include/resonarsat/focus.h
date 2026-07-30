@@ -164,6 +164,33 @@ resonarsat_status_t rs_focus_backproject(const rs_cphd_t *cphd,
  * here to remedy. */
 typedef struct {
     int single_thread;
+
+    /* Number of taps for the range interpolator. 0 or 2 keeps the linear
+     * interpolation described above; 4, 8 or 16 select a Hann-windowed sinc.
+     *
+     * WHY THIS IS AN OPTION AND NOT A FIX. Linear interpolation is convolution
+     * with a triangle kernel, whose response is sinc^2(f/fs). If the
+     * range-compressed signal fills the sampled band -- which CPHD FX-domain
+     * sampling gives, since the bin spacing is set by the transmitted bandwidth
+     * -- the band edge is attenuated by sinc^2(0.5), which is -7.9 dB, and the
+     * residual folds back as aliasing. That error is not random across pulses:
+     * the fractional bin position varies smoothly with slant range along the
+     * aperture, so it is coherent, and coherent range error shows up as
+     * structure in cross-range.
+     *
+     * NGA's reference backprojector avoids this by zero-padding the range
+     * profile eightfold before interpolating, with the comment that linear
+     * interpolation "causes cross-range artifacts unless we sinc interpolate
+     * first" (MATLAB_SAR, Processing/IFP/BP/bpBasic.m). Zero-padding is not
+     * available here at that factor -- eight times an eleven-gigabyte load is
+     * not a trade this pipeline can make -- so the same correction is applied in
+     * the kernel instead, at the cost of arithmetic in the hot loop rather than
+     * memory.
+     *
+     * Left off by default until measured on real data, so that the change is a
+     * decision with a number behind it rather than a deference to another
+     * implementation. tests/test_focus.c carries the measurement. */
+    int range_taps;
 } rs_focus_opts_t;
 
 /* As rs_focus_backproject(), with execution options.
