@@ -267,5 +267,132 @@ int main(void)
         rs_microm_free(&m1); rs_microm_free(&m2);
     }
 
+    /* ------------------------------------------------------------------
+     * TWO STABILITY PROBES, and only one of them works.
+     *
+     * The unambiguous depth is 2*pi*n_looks/kz_max -- linear in the look
+     * count -- so a reflector deeper than it folds back and appears shallow.
+     * A folded peak is indistinguishable from a real one in a single
+     * tomogram: same shape, same contrast, plausible depth. The question is
+     * what perturbation separates them.
+     *
+     * Both probes come from the independent reproduction at
+     * github.com/Hassanforeman/subsurface-sar-tomo, which found that one
+     * discriminates and one does not, and kept the failure on purpose. Both
+     * are reproduced here for the same reason: the negative is the more
+     * useful of the two, because it is the one somebody would otherwise
+     * reach for.
+     * ------------------------------------------------------------------ */
+
+    const double zmax32 = rs_tomo_max_depth(&p, 32);
+
+    RS_CASE("look-count stability separates a real reflector from a folded one");
+    {
+        const size_t counts[] = { 32, 48, 64, 96, 128 };
+        const size_t n_counts = sizeof counts / sizeof counts[0];
+
+        /* Comfortably inside the smallest configuration's range, and well
+         * beyond it -- 1.8x, so it wraps at 32 and 48 looks and is in range
+         * from 64 up. */
+        const double z_real   = 0.35 * zmax32;
+        const double z_folded = 1.80 * zmax32;
+
+        double rec_real[5], rec_folded[5];
+        for (size_t i = 0; i < n_counts; i++) {
+            rs_tomo_params_t q = p;
+            /* Each configuration searches its OWN full unambiguous range, which
+             * is what a caller following the depth guard would do. That is what
+             * makes the folded case move: at 32 and 48 looks the reflector is
+             * beyond the range and wraps to a different shallow depth each
+             * time, and from 64 looks up the range finally covers it and it
+             * appears where it really is. */
+            q.depth_max = rs_tomo_max_depth(&p, counts[i]);
+
+            const double amp = 1.0;
+            rs_microm_t mr, mf;
+            RS_CHECK_OK(make_depth_scene(&mr, 4, counts[i], &q, &z_real, &amp, 1));
+            RS_CHECK_OK(make_depth_scene(&mf, 4, counts[i], &q, &z_folded, &amp, 1));
+
+            rs_tomo_t tr, tf;
+            RS_CHECK_OK(rs_tomo_focus(&mr, NULL, &q, NULL, &tr));
+            RS_CHECK_OK(rs_tomo_focus(&mf, NULL, &q, NULL, &tf));
+            rec_real[i] = peak_depth(&tr);
+            rec_folded[i] = peak_depth(&tf);
+            rs_tomo_free(&tr); rs_tomo_free(&tf);
+            rs_microm_free(&mr); rs_microm_free(&mf);
+        }
+
+        double mr_ = 0.0, mf_ = 0.0;
+        for (size_t i = 0; i < n_counts; i++) { mr_ += rec_real[i]; mf_ += rec_folded[i]; }
+        mr_ /= (double)n_counts; mf_ /= (double)n_counts;
+        double sr = 0.0, sf = 0.0;
+        for (size_t i = 0; i < n_counts; i++) {
+            sr += (rec_real[i] - mr_) * (rec_real[i] - mr_);
+            sf += (rec_folded[i] - mf_) * (rec_folded[i] - mf_);
+        }
+        sr = sqrt(sr / (double)n_counts);
+        sf = sqrt(sf / (double)n_counts);
+
+        printf("    unambiguous depth at 32 looks: %.2f m\n", zmax32);
+        printf("    real   (z = %.2f m):", z_real);
+        for (size_t i = 0; i < n_counts; i++) printf(" %6.2f", rec_real[i]);
+        printf("   sd %.3f m\n", sr);
+        printf("    folded (z = %.2f m):", z_folded);
+        for (size_t i = 0; i < n_counts; i++) printf(" %6.2f", rec_folded[i]);
+        printf("   sd %.3f m\n", sf);
+
+        /* The guard: a real reflector holds its depth across look counts. */
+        RS_CHECK(sr < dT);
+        /* And a folded one does not, by a wide margin. */
+        RS_CHECK(sf > 4.0 * sr);
+    }
+
+    RS_CASE("grid extent does NOT separate them -- kept as a negative result");
+    {
+        /* A reflector 1.4x beyond the unambiguous depth at 64 looks folds to
+         * 0.4x of it. That folded position is fixed by the wavenumber
+         * sampling, not by how much depth the grid covers, so widening the
+         * grid moves it not at all -- and the artefact looks exactly as
+         * "stable" as a real reflector would. */
+        const size_t n_looks_b = 64;
+        const double zmax64 = rs_tomo_max_depth(&p, n_looks_b);
+        const double z_folded = 1.4 * zmax64;
+        const double widths[] = { 0.6, 0.8, 1.0 };
+        const size_t n_w = sizeof widths / sizeof widths[0];
+
+        double rec[3];
+        for (size_t i = 0; i < n_w; i++) {
+            rs_tomo_params_t q = p;
+            q.depth_max = widths[i] * zmax64;
+
+            const double amp = 1.0;
+            rs_microm_t m;
+            RS_CHECK_OK(make_depth_scene(&m, 4, n_looks_b, &q, &z_folded, &amp, 1));
+            rs_tomo_t t;
+            RS_CHECK_OK(rs_tomo_focus(&m, NULL, &q, NULL, &t));
+            rec[i] = peak_depth(&t);
+            rs_tomo_free(&t);
+            rs_microm_free(&m);
+        }
+
+        double mean = 0.0;
+        for (size_t i = 0; i < n_w; i++) mean += rec[i];
+        mean /= (double)n_w;
+        double sd = 0.0;
+        for (size_t i = 0; i < n_w; i++) sd += (rec[i] - mean) * (rec[i] - mean);
+        sd = sqrt(sd / (double)n_w);
+
+        printf("    folded reflector (z = %.2f m, folds to %.2f m) across grid widths:",
+               z_folded, z_folded - zmax64);
+        for (size_t i = 0; i < n_w; i++) printf(" %6.2f", rec[i]);
+        printf("   sd %.3f m\n", sd);
+
+        /* THE ASSERTION IS THAT THE PROBE FAILS. If this ever starts
+         * discriminating, the reason needs understanding before anyone treats
+         * grid extent as a guard -- which is exactly the mistake this case
+         * exists to prevent. */
+        RS_CHECK(sd < dT);
+    }
+
     RS_TEST_END();
 }
