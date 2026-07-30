@@ -239,6 +239,59 @@ int main(void)
         rs_subap_stack_free(&s);
     }
 
+    /* THE ONE PUBLISHED B_SHIFT, AND WHERE IT FITS.
+     *
+     * Biondi's power-line paper (Preprints 2023, doi
+     * 10.20944/preprints202308.0926.v1) states B_shift = B_CD/100 -- the only
+     * value any source gives. The sweep geometry allows at most one step of
+     * headroom, and with B_DL = B_CD/2 that step is B_CD/(2*N_D), so the
+     * published value is admissible only for N_D <= 50 and coincides with this
+     * code's derived default exactly at N_D = 50.
+     *
+     * That arithmetic is argued in rs_subap_params_t.b_shift_hz and is checked
+     * here, because a claim about which published configurations are
+     * representable should not rest on a comment. */
+    RS_CASE("the published B_shift fits only up to fifty sub-apertures");
+    {
+        rs_subap_params_t p;
+        rs_subap_params_default(&p);
+        p.mode = RS_SUBAP_PAPER;
+        p.left_out_frac = 0.5;
+        p.pair = 1;
+
+        /* The Doppler band the split will measure, taken from the stack itself
+         * so the test uses the same number the layout does. */
+        p.n_looks = 50;
+        rs_subap_stack_t s;
+        RS_CHECK_OK(rs_subaperture_split(&img, &p, &s));
+        const double bw = s.doppler_bandwidth;
+        const double step_50 = s.b_shift_hz;
+        rs_subap_stack_free(&s);
+
+        const double published = bw / 100.0;
+        printf("    B_CD %.4g Hz; published B_CD/100 = %.4g Hz; "
+               "sweep step at 50 looks = %.4g Hz\n", bw, published, step_50);
+
+        /* Equal at fifty, to floating-point noise. */
+        RS_CHECK_REL(published, step_50, 1e-9);
+        p.b_shift_hz = published;
+        RS_CHECK_OK(rs_subaperture_split(&img, &p, &s));
+        rs_subap_stack_free(&s);
+
+        /* Below fifty the step is wider than the published value, so it fits. */
+        p.n_looks = 32;
+        RS_CHECK_OK(rs_subaperture_split(&img, &p, &s));
+        rs_subap_stack_free(&s);
+
+        /* Above fifty the step has shrunk past it and the layout refuses it.
+         * At the 128 looks the Giza runs used, the published configuration is
+         * not representable at all. */
+        p.n_looks = 128;
+        printf("    at 128 looks the published value is %.3f of the sweep step\n",
+               published / (bw / (2.0 * 128.0)));
+        RS_CHECK_ERR(rs_subaperture_split(&img, &p, &s), RS_ERR_ARG);
+    }
+
     /* THE DEFAULT B_shift COLLAPSES THE PAIR, and this measures it rather than
      * arguing it. B_shift defaults to the sweep step, the slave of look k is
      * therefore centred exactly where the master of look k+1 is, and both are

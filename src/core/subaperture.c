@@ -395,9 +395,26 @@ resonarsat_status_t rs_subaperture_split(const rs_slc_t *img,
      *
      * This equivalence is what makes the shortcut legitimate, and it stops
      * holding the moment a sub-band of the chirp is used -- Eq. (6)'s B_Cr_i,
-     * and claim 7's "chirp-Doppler sub-apertures". Nothing in the described
-     * method exercises that, but an implementation of it must transform in two
-     * dimensions rather than extending this loop. */
+     * and claim 7's "chirp-Doppler sub-apertures". An implementation of that
+     * must transform in two dimensions rather than extending this loop.
+     *
+     * THAT PATH IS EXERCISED, which this comment previously denied. Biondi,
+     * "High-Voltage Electric Power Transmission Monitoring by Micro-Motion
+     * Estimation on Synthetic Aperture Radar Data" (Preprints 2023,
+     * doi 10.20944/preprints202308.0926.v1) builds exactly it: its Figure 2 is a
+     * grid of N_c chirp band-passes crossed with N_D Doppler sub-apertures, its
+     * Figure 4 wires the two into one pipeline, and its section 4 credits the
+     * "frequency diversity" with the improvement it reports. So the
+     * two-dimensional case is not hypothetical; it is a published application of
+     * the same method by the same author, on COSMO-SkyMed staring spotlight.
+     *
+     * It remains unimplemented here, and deliberately so rather than by
+     * oversight: the paper that exercises it reports a 50 Hz line at 51.23 Hz
+     * and 57.87 Hz from two processing routes on the same target, against a
+     * mains frequency regulated to 0.05 Hz, and validates against a microphone
+     * recording made about 320 km from the SAR scene. Adding a stage on that
+     * evidence would be adding surface area, not capability. The seam is
+     * recorded so that a future implementation knows where it goes. */
     float complex *col = malloc(n_az * sizeof *col);
     float complex *band_col = malloc(n_az * sizeof *band_col);
     rs_fft_plan *plan = NULL;

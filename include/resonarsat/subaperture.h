@@ -68,7 +68,13 @@ struct rs_grid;
  * independent of the sweep, which advances the rigid pair separately in N_D
  * steps. But it gives no value and no selection rule for B_shift anywhere,
  * including in its claims -- it states a best value only for the held-out band,
- * B_CL = B_CD/2 -- so there is no defensible value to set it to.
+ * B_CL = B_CD/2.
+ *
+ * One value exists, in the same author's power-line paper rather than in either
+ * source this project reproduces: B_shift = B_CD/100. It is admissible only for
+ * N_D <= 50 and equals the step exactly at N_D = 50, so it is not a rule that
+ * can be followed generally. The full argument, with the arithmetic, is beside
+ * rs_subap_params_t.b_shift_hz.
  *
  * This therefore pins B_shift to the printed Doppler step (B_CD - B_DL)/N_D,
  * the one spacing the sources do define, and records it in rs_subap_stack_t.
@@ -113,10 +119,37 @@ typedef struct {
      * observed." The sweep is a separate motion, advancing the rigid pair in
      * N_D steps of (B_CD-B_DL)/N_D.
      *
-     * Zero means derive it from the step, which is what this code did
-     * exclusively before the patent was read directly. That remains the default
-     * because no source gives a value or a selection rule for B_shift -- the
-     * patent states a best value only for the held-out band, B_CL = B_CD/2.
+     * A VALUE DOES EXIST, IN A THIRD SOURCE, AND IT IS NOT USABLE AT THE LOOK
+     * COUNTS THIS PROJECT RUNS. Biondi, "High-Voltage Electric Power
+     * Transmission Monitoring by Micro-Motion Estimation on Synthetic Aperture
+     * Radar Data" (Preprints 2023, doi 10.20944/preprints202308.0926.v1),
+     * section 3, states it plainly: "The band B_shift was set to about 1/100 of
+     * the total Doppler band". That is the only number any source gives, and it
+     * corrects what this comment said before: the patent and the Giza paper give
+     * none, but the same author's power-line paper does.
+     *
+     * It does not survive contact with the sweep geometry. The band layout keeps
+     * one step of headroom, so B_shift may not exceed the sweep step, and with
+     * the paper's B_DL = B_CD/2 that step is B_CD/(2*N_D). The published value
+     * is a fixed fraction of the band while the step shrinks as N_D grows, so
+     * their ratio is exactly N_D/50:
+     *
+     *     N_D =  16   published value is 0.32x the step   admissible
+     *     N_D =  32                      0.64x            admissible
+     *     N_D =  50                      1.00x            admissible, and EQUAL
+     *     N_D = 128                      2.56x            REFUSED
+     *
+     * So it is usable only at fifty sub-apertures or fewer, it coincides with
+     * this code's derived default exactly at fifty, and above fifty it does not
+     * fit the layout at all. At the 128 looks the Giza runs here used it is 2.56
+     * times the step and rs_subaperture_split() rejects it -- the published
+     * configuration is simply not representable at the look counts this project
+     * has been running.
+     *
+     * So zero still means derive it from the step. Not because no value exists
+     * -- one does, and it is cited above -- but because a single stated ratio
+     * from one application, which coincides with this code's own default at one
+     * particular look count, is not a selection rule. Pass --b-shift to use it.
      *
      * The frequency this selects follows from the spectral gap being a time lag,
      * dt = B_shift * t_dwell / B_CD: a pair separated by dt is blind at DC and
