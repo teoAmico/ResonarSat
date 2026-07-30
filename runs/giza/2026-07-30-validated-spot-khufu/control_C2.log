@@ -1,0 +1,16 @@
+warning: grid cell 0.400 m is coarser than the 0.064 m azimuth
+         resolution this collect supports. The image will alias:
+         each scatterer gains ghost peaks that resemble real
+         targets. Use --cell 0.064 or finer, or treat the result
+         as deliberately multi-looked.
+sub-apertures: 159 looks, dt 0.1200 s
+  observable band  f_max 4.17 Hz   AT sub-look resolution 1.28 m
+sub-pixel refinement: 1/40 px (default 1/10 azimuth, 1/20 range)
+tracked 361 windows (19 x 19); 361 pass the 0.00 coherence mask
+wrote /private/tmp/claude-501/-Users-matteoamico-Workspace-ResonarSat/997d2a4b-ec5d-4401-bc75-fbae45a2f033/scratchpad/lad_C2.csv (361 windows x 159 looks, pre-spectrum)
+spectra: 80 bins, 0.0524 Hz resolution
+strongest peak in window 220: 0.314 Hz, prominence 39.8, quality 0.306, peak-to-peak velocity 75.8 mm/s
+  15 of 361 windows were eligible for selection (coherence gate and quantisation floor)
+  sub-aperture response 0.8451 (-1.5 dB) at an observation ratio of 0.31
+  (amplitude is QUALITATIVE -- relative amplitudes do not validate
+   against ground truth even where frequencies do)
