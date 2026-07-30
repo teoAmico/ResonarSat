@@ -1,0 +1,18 @@
+--at 29.979175,31.134186 resolves to --offset -152,-552 in this product's image plane
+sub-apertures: 2048 looks, dt 0.0159 s
+  observable band  f_max 31.47 Hz   AT sub-look resolution 10.59 m
+tracked 225 windows (15 x 15); 178 pass the 0.40 coherence mask
+wrote runs/giza/2026-07-30-uniform-phase-khufu/B_pulse_n2048_phase.csv (225 windows x 2048 looks, pre-spectrum)
+spectrum taken of line-of-sight DISPLACEMENT, which is what the phase estimator measures directly
+spectra: 1025 bins, 0.0307 Hz resolution
+strongest peak in window 200: 0.830 Hz, prominence 89.8, quality 0.473, peak-to-peak velocity 1981.7 mm/s
+  193 of 225 windows were eligible for selection (coherence gate; the floor does not apply to this estimator)
+  sub-aperture response 0.9713 (-0.3 dB) at an observation ratio of 0.13
+
+NULL FLOOR from 16 shuffles of the sub-look time order:
+  mean 20.5, sd 2.2, worst 24.7
+  detection 89.8 is 4.37x the mean and 3.64x the worst null
+  0 of 16 nulls reached it -- empirical p = 0.0588
+  (amplitude is QUALITATIVE -- relative amplitudes do not validate
+   against ground truth even where frequencies do)
+wrote runs/giza/2026-07-30-uniform-phase-khufu/B_pulse_n2048_phase_freq.png and runs/giza/2026-07-30-uniform-phase-khufu/B_pulse_n2048_phase_quality.png

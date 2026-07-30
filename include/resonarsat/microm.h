@@ -254,6 +254,30 @@ typedef enum {
  *                              lambda/(2*dt) is the tell: that is the ceiling
  *                              the fold imposes, and hitting it means the
  *                              series wrapped rather than that the target moved.
+ *
+ *                              THE SHUFFLE NULL TEST IS INVALID FOR THIS
+ *                              ESTIMATOR. rs_null_floor(), --shuffle-looks and
+ *                              --null-trials destroy the sub-look time order and
+ *                              hold everything else constant -- for a
+ *                              correlation observable. For phase they do not:
+ *                              reordering puts non-consecutive looks adjacent,
+ *                              which is precisely where a phase series steps
+ *                              furthest, so the shuffle inflates the per-step
+ *                              noise it is supposed to preserve. Measured on the
+ *                              Giza collect at 128 looks and 0.99 overlap, the
+ *                              median largest step is 0.052 rad in order and
+ *                              1.878 rad shuffled -- a factor of 36. A drifting
+ *                              series therefore beats its own shuffles by
+ *                              construction: that run cleared 32 of them at
+ *                              p = 0.03 while every window on the grid reported
+ *                              whatever bin the search was told to start at, and
+ *                              8 simulated motionless collects reproduced the
+ *                              same frequency at 99 percent of the same
+ *                              prominence. Adjudicate a phase result with
+ *                              rs_null_static() (--null-static), which a
+ *                              motionless scene cannot walk over because it
+ *                              carries the same overlap, unwrap and detrend.
+ *                              See runs/giza/2026-07-30-uniform-phase-khufu/.
  */
 typedef enum {
     RS_MICROM_EST_CORRELATION = 0,

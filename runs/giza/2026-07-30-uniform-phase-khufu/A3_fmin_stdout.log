@@ -1,0 +1,24 @@
+--at 29.979175,31.134186 resolves to --offset -152,-552 in this product's image plane
+sub-apertures: 128 looks, dt 0.1448 s
+  observable band  f_max 3.45 Hz   AT sub-look resolution 0.12 m
+tracked 225 windows (15 x 15); 189 pass the 0.40 coherence mask
+band floor: ignoring bins below 0.300 Hz when picking the peak
+spectrum taken of line-of-sight DISPLACEMENT, which is what the phase estimator measures directly
+spectra: 65 bins, 0.0540 Hz resolution
+strongest peak in window 217: 0.324 Hz, prominence 55.8, quality 0.756, peak-to-peak velocity 1.2 mm/s
+  170 of 225 windows were eligible for selection (coherence gate; the floor does not apply to this estimator)
+  sub-aperture response 0.0565 (-25.0 dB) at an observation ratio of 4.69
+     Amplitudes here are attenuated by the sub-aperture window
+     and are underestimates; frequencies are not affected.
+     Note the response above assumes displacement averaging,
+     which is what this tracker measures. Phase-based micro-
+     Doppler is not bound by it: the literature recovers 36 Hz
+     at an observation ratio of exactly 18, where this model
+     predicts zero.
+
+NULL FLOOR from 32 shuffles of the sub-look time order:
+  mean 9.9, sd 1.4, worst 12.8
+  detection 55.8 is 5.61x the mean and 4.36x the worst null
+  0 of 32 nulls reached it -- empirical p = 0.0303
+  (amplitude is QUALITATIVE -- relative amplitudes do not validate
+   against ground truth even where frequencies do)

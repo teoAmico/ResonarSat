@@ -911,6 +911,36 @@ static int rs_cmd_focus(int argc, char **argv)
     return st == RS_OK ? 0 : 1;
 }
 
+/* Warn that a shuffled null floor does not bound a phase measurement.
+ *
+ * "Only the ordering is destroyed" holds for an observable each look carries on
+ * its own. Phase is unwrapped ACROSS looks, so a permutation sets
+ * non-consecutive looks side by side -- exactly where the series steps furthest
+ * -- and inflates the per-step noise the test exists to hold constant. Measured
+ * on the Giza collect at 128 looks and 0.99 overlap: median largest step 0.052
+ * rad in order against 1.878 rad shuffled, a factor of 36. A drifting series
+ * then beats its own shuffles by construction, and one did, at p = 0.03, while
+ * eight motionless simulations reproduced its frequency at 99 percent of its
+ * prominence.
+ *
+ * Printed rather than refused, because the floor is still worth seeing and a
+ * caller may want it for comparison. What must not happen is a reader taking it
+ * for a bound it is not, which is why this sits next to the number rather than
+ * only in the header. See rs_microm_estimator_t and
+ * runs/giza/2026-07-30-uniform-phase-khufu/. */
+static void rs_warn_shuffle_null_on_phase(rs_microm_estimator_t est)
+{
+    if (est != RS_MICROM_EST_PHASE) return;
+    printf("  WARNING: this is a PHASE measurement, and a shuffle does not bound\n"
+           "           one. Unwrapping runs ACROSS looks, so reordering inflates\n"
+           "           the per-step noise the test is meant to hold fixed -- 36x\n"
+           "           on the Giza collect -- and a drifting series beats its own\n"
+           "           shuffles whatever it contains. This floor is not a bound.\n"
+           "           Use --null-static, which a motionless scene carries the\n"
+           "           same overlap, unwrap and detrend through and so cannot\n"
+           "           walk over.\n");
+}
+
 /* Permute the time order of a sub-aperture stack in place, for a null test.
  *
  * On synthetic data a null test is easy: generate the scene again with nothing
@@ -945,6 +975,17 @@ static void rs_shuffle_looks(rs_subap_stack_t *stack, unsigned seed)
 }
 
 /* Measure the null floor by repeated shuffling, and report the margin.
+ *
+ * NOT VALID FOR RS_MICROM_EST_PHASE. This holds everything but the time order
+ * constant only for an observable that reads each look independently. A phase
+ * series is unwrapped ACROSS looks, so reordering -- which sets non-consecutive
+ * looks side by side -- inflates the very per-step noise the test is supposed to
+ * preserve: 0.052 rad in order against 1.878 rad shuffled on the Giza collect at
+ * 128 looks and 0.99 overlap, a factor of 36. A drifting phase series then beats
+ * its own shuffles by construction, and one did, at p = 0.03, while a motionless
+ * simulation reproduced its frequency at 99 percent of its prominence. Use
+ * rs_null_static() for phase. See rs_microm_estimator_t and
+ * runs/giza/2026-07-30-uniform-phase-khufu/.
  *
  * Loads nothing and focuses nothing: the caller's stack is reused, so a trial
  * costs a track and a spectrum rather than another read and range compression
@@ -1214,25 +1255,17 @@ static int rs_cmd_mmotion(int argc, char **argv)
         rs_report_error("mmotion", st); rs_cphd_free(&c); return 1;
     }
 
-    const unsigned shuffle = (unsigned)rs_opt_double(argc, argv, "--shuffle-looks", 0.0);
-    if (shuffle) {
-        rs_shuffle_looks(&stack, shuffle);
-        printf("NULL TEST: sub-look time order shuffled with seed %u. Scene, coherence\n"
-               "  and geometry are unchanged; only the ordering is destroyed. Whatever\n"
-               "  prominence appears below is the floor, not a detection.\n", shuffle);
-    }
-
-    printf("sub-apertures: %zu looks, dt %.4f s\n", stack.n_looks, stack.dt);
-    printf("  observable band  f_max %.2f Hz   AT sub-look resolution %.2f m\n",
-           stack.f_max, stack.az_resolution);
-
     rs_microm_params_t mp;
     rs_microm_params_default(&mp);
     mp.reference = (rs_microm_ref_t)ref_mode;
     mp.no_optimize = no_optimize;
     {
         /* --estimator selects WHAT is measured, not merely how well. Phase and
-         * correlation live in different regimes; see rs_microm_estimator_t. */
+         * correlation live in different regimes; see rs_microm_estimator_t.
+         *
+         * Read before the shuffle below rather than after it, because whether a
+         * shuffled floor bounds anything depends on the answer, and the caveat
+         * belongs beside the notice rather than several screens later. */
         const char *est = rs_opt(argc, argv, "--estimator");
         if (est) {
             if (strcmp(est, "phase") == 0)            mp.estimator = RS_MICROM_EST_PHASE;
@@ -1242,6 +1275,20 @@ static int rs_cmd_mmotion(int argc, char **argv)
                                  "using correlation\n", est);
         }
     }
+
+    const unsigned shuffle = (unsigned)rs_opt_double(argc, argv, "--shuffle-looks", 0.0);
+    if (shuffle) {
+        rs_shuffle_looks(&stack, shuffle);
+        printf("NULL TEST: sub-look time order shuffled with seed %u. Scene, coherence\n"
+               "  and geometry are unchanged; only the ordering is destroyed. Whatever\n"
+               "  prominence appears below is the floor, not a detection.\n", shuffle);
+        rs_warn_shuffle_null_on_phase(mp.estimator);
+    }
+
+    printf("sub-apertures: %zu looks, dt %.4f s\n", stack.n_looks, stack.dt);
+    printf("  observable band  f_max %.2f Hz   AT sub-look resolution %.2f m\n",
+           stack.f_max, stack.az_resolution);
+
     mp.win_az = mp.win_rg = (size_t)rs_opt_double(argc, argv, "--win", 32);
     mp.stride_az = mp.stride_rg = mp.win_az / 2;
     mp.coherence_min = rs_opt_double(argc, argv, "--coherence", 0.4);
@@ -1562,6 +1609,10 @@ static int rs_cmd_mmotion(int argc, char **argv)
                 printf("  A null matched or beat the measurement. At this operating point\n"
                        "  the detection is not distinguishable from shuffled noise.\n");
             }
+            /* The warning matters most in the case that looks like success: a
+             * phase run clearing every shuffle prints nothing above, and that
+             * silence is what a reader would otherwise take for a bound. */
+            rs_warn_shuffle_null_on_phase(mp.estimator);
         }
     }
 

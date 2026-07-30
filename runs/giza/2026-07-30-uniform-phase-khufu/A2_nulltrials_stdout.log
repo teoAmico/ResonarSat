@@ -1,0 +1,16 @@
+--at 29.979175,31.134186 resolves to --offset -152,-552 in this product's image plane
+sub-apertures: 128 looks, dt 0.1448 s
+  observable band  f_max 3.45 Hz   AT sub-look resolution 0.12 m
+tracked 225 windows (15 x 15); 189 pass the 0.40 coherence mask
+spectrum taken of line-of-sight DISPLACEMENT, which is what the phase estimator measures directly
+spectra: 65 bins, 0.0540 Hz resolution
+strongest peak in window 30: 0.054 Hz, prominence 60.3, quality 0.807, peak-to-peak velocity 111.4 mm/s
+  170 of 225 windows were eligible for selection (coherence gate; the floor does not apply to this estimator)
+  sub-aperture response 0.2585 (-11.8 dB) at an observation ratio of 0.78
+
+NULL FLOOR from 32 shuffles of the sub-look time order:
+  mean 10.8, sd 1.5, worst 13.9
+  detection 60.3 is 5.60x the mean and 4.34x the worst null
+  0 of 32 nulls reached it -- empirical p = 0.0303
+  (amplitude is QUALITATIVE -- relative amplitudes do not validate
+   against ground truth even where frequencies do)

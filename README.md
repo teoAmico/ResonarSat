@@ -82,9 +82,15 @@ paper and patent, so the technique itself can be tested.
 The micro-motion half of this technique — measuring vibration of the ground and of
 structures from a single satellite pass — is established work, validated by independent
 groups against accelerometers placed on the targets themselves; the references at the end
-give that literature. This implementation has not reproduced it. Every micro-motion
-measurement made with it so far has failed its null test, and nothing here should be read as
-a demonstrated sensitivity.
+give that literature. This implementation has not reproduced it, and nothing here should be
+read as a demonstrated sensitivity. Every measurement from the patent's own chain has failed
+its null test outright. The validated chain (`--subap uniform --estimator phase`) instead
+*passes* the shuffle test at Giza, at p = 0.03 — and then reports the same frequency, within
+1% of the same prominence, that the identical processing produces from a simulated world
+containing no motion. **Do not trust `--shuffle-looks` on a phase observable**: destroying
+the time order inflates the per-step phase noise 36-fold, so a drifting series beats the
+roughened version of itself. Run `--null-static`, which a motionless scene cannot walk over.
+See [`runs/giza/2026-07-30-uniform-phase-khufu/`](runs/giza/2026-07-30-uniform-phase-khufu/RUN.md).
 
 **Two different limits are easy to confuse.** The step between sub-apertures sets how finely
 in time the ground is sampled, and so the highest frequency representable at all; each

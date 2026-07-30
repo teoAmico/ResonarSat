@@ -1,0 +1,23 @@
+--at 29.979175,31.134186 resolves to --offset -152,-552 in this product's image plane
+NULL TEST: sub-look time order shuffled with seed 20260730. Scene, coherence
+  and geometry are unchanged; only the ordering is destroyed. Whatever
+  prominence appears below is the floor, not a detection.
+sub-apertures: 128 looks, dt 0.1448 s
+  observable band  f_max 3.45 Hz   AT sub-look resolution 0.12 m
+tracked 225 windows (15 x 15); 200 pass the 0.40 coherence mask
+wrote runs/giza/2026-07-30-uniform-phase-khufu/Anull_uniform_n128_phase.csv (225 windows x 128 looks, pre-spectrum)
+spectrum taken of line-of-sight DISPLACEMENT, which is what the phase estimator measures directly
+spectra: 65 bins, 0.0540 Hz resolution
+strongest peak in window 208: 2.158 Hz, prominence 6.5, quality 0.674, peak-to-peak velocity 185.4 mm/s
+  177 of 225 windows were eligible for selection (coherence gate; the floor does not apply to this estimator)
+  sub-aperture response 0.0072 (-42.9 dB) at an observation ratio of 31.25
+     Amplitudes here are attenuated by the sub-aperture window
+     and are underestimates; frequencies are not affected.
+     Note the response above assumes displacement averaging,
+     which is what this tracker measures. Phase-based micro-
+     Doppler is not bound by it: the literature recovers 36 Hz
+     at an observation ratio of exactly 18, where this model
+     predicts zero.
+  (amplitude is QUALITATIVE -- relative amplitudes do not validate
+   against ground truth even where frequencies do)
+wrote runs/giza/2026-07-30-uniform-phase-khufu/Anull_uniform_n128_phase_freq.png and runs/giza/2026-07-30-uniform-phase-khufu/Anull_uniform_n128_phase_quality.png

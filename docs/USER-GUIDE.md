@@ -210,9 +210,23 @@ In order of likelihood:
 
 A pattern in noise looks like a pattern. Two checks are built in.
 
-**Shuffle the frame order** with `--null-trials N`. Everything is preserved
-except the sequence in time, which no real vibration survives. The output
-reports how many shuffles matched or beat your measurement.
+**Shuffle the frame order** with `--null-trials N`. The intent is that everything
+is preserved except the sequence in time, which no real vibration survives. The
+output reports how many shuffles matched or beat your measurement.
+
+> **The shuffle does not preserve everything except time, and with
+> `--estimator phase` it is not a valid test.** Reordering the frames puts
+> non-consecutive looks next to each other, which is exactly when a phase series
+> steps furthest. Measured over Giza: the median largest step between frames is
+> 0.052 rad in the real order and 1.878 rad shuffled — the shuffle inflates the
+> per-step noise 36-fold. That leaves a smooth series being compared against a
+> deliberately roughened one, so a slow drift beats its own shuffles easily and
+> the test reports a strong detection where there is none. It passed one at
+> p = 0.03 that `--null-static` then placed within 1% of a motionless scene
+> (`runs/giza/2026-07-30-uniform-phase-khufu/`). Use the shuffle for
+> `correlation`, where the observable is a patch position and reordering does not
+> change the per-frame noise. For `phase`, treat a passed shuffle as necessary
+> and nowhere near sufficient, and go to the static test.
 
 **Simulate a motionless scene** with `--null-static N`. This builds synthetic
 data of completely still objects using your satellite's actual path and timing,
@@ -236,7 +250,12 @@ from one built on a real signal.
 Two further checks worth running on any peak you believe:
 
 - Re-run with `--fmin` set above the lowest few bins. A peak that vanishes was
-  drift, not vibration.
+  drift, not vibration — but watch for the peak that *moves* instead. A drifting
+  series has a red spectrum, so raising the floor relocates the peak to just
+  above the new cut rather than removing it. Run a ladder (`--fmin` 0.3, 1.0,
+  2.0) and look at where the peak lands each time: a mode stays put, drift
+  follows the cut. Watch the prominence too, which decays as the cut moves away
+  from DC when the energy is really at DC.
 - Check the reported observation ratio. If each frame spans many cycles of the
   frequency you found, the amplitude is heavily understated.
 
