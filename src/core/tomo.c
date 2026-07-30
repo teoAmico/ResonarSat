@@ -741,6 +741,154 @@ resonarsat_status_t rs_tomo_focus(const rs_microm_t *m,
     return st;
 }
 
+/* Eigenvalues of a real symmetric matrix by cyclic Jacobi, in place.
+ *
+ * Chosen over anything faster because it needs no dependency, is short enough
+ * to audit, and is unconditionally stable on the small matrices here -- the
+ * steering matrix's smaller dimension is the sub-aperture count or the depth
+ * cell count, tens either way. Eigenvalues are left on the diagonal; the
+ * eigenvectors are not accumulated because nothing here needs them. */
+static void rs_jacobi_eigenvalues(double *a, size_t n, double *out)
+{
+    for (size_t sweep = 0; sweep < 60; sweep++) {
+        double off = 0.0;
+        for (size_t p = 0; p < n; p++)
+            for (size_t q = p + 1; q < n; q++) off += a[p * n + q] * a[p * n + q];
+        if (off <= 1e-30) break;
+
+        for (size_t p = 0; p < n; p++) {
+            for (size_t q = p + 1; q < n; q++) {
+                const double apq = a[p * n + q];
+                if (fabs(apq) < 1e-300) continue;
+                const double theta = 0.5 * (a[q * n + q] - a[p * n + p]) / apq;
+                const double t = (theta >= 0.0 ? 1.0 : -1.0)
+                               / (fabs(theta) + sqrt(theta * theta + 1.0));
+                const double c = 1.0 / sqrt(t * t + 1.0);
+                const double s = t * c;
+                for (size_t m = 0; m < n; m++) {
+                    const double amp = a[m * n + p], amq = a[m * n + q];
+                    a[m * n + p] = c * amp - s * amq;
+                    a[m * n + q] = s * amp + c * amq;
+                }
+                for (size_t m = 0; m < n; m++) {
+                    const double apm = a[p * n + m], aqm = a[q * n + m];
+                    a[p * n + m] = c * apm - s * aqm;
+                    a[q * n + m] = s * apm + c * aqm;
+                }
+            }
+        }
+    }
+    for (size_t i = 0; i < n; i++) out[i] = a[i * n + i];
+}
+
+/* Ascending comparison for qsort over doubles. */
+static int rs_cmp_double(const void *x, const void *y)
+{
+    const double a = *(const double *)x, b = *(const double *)y;
+    return (a > b) - (a < b);
+}
+
+/* Singular values of the steering matrix, and what they say about it. */
+resonarsat_status_t rs_tomo_conditioning(const rs_tomo_params_t *params,
+                                         size_t n_looks, size_t n_depth,
+                                         double rank_tol, double *sv_max,
+                                         double *sv_min, double *condition,
+                                         size_t *n_rank)
+{
+    if (!params || n_looks == 0 || n_depth == 0) {
+        rs_set_error("tomo conditioning: needs a look count and a depth count");
+        return RS_ERR_ARG;
+    }
+    if (!(rank_tol > 0.0)) rank_tol = 1e-3;
+
+    const size_t k = n_looks, F = n_depth;
+    const double lambda_ac = rs_acoustic_wavelength(params->velocity,
+                                                    params->frequency,
+                                                    params->convention);
+    const double eq22_scale = rs_tomo_eq22_scale(params);
+
+    /* The same A the inversion builds, so this describes the operator actually
+     * used rather than an idealisation of it. */
+    double complex *A = malloc(k * F * sizeof *A);
+    if (!A) return RS_ERR_ALLOC;
+    for (size_t i = 0; i < k; i++) {
+        const double b_perp = params->aperture * ((double)i / (double)k);
+        const double kz = rs_tomo_wavenumber(b_perp, lambda_ac, params->slant_range,
+                                             params->incidence) * eq22_scale;
+        for (size_t j = 0; j < F; j++) {
+            A[i * F + j] = cexp(I * kz * (params->depth_cell * (double)j));
+        }
+    }
+
+    /* Work with whichever Gram matrix is smaller: it carries every non-zero
+     * singular value, and the larger one only pads with structural zeros. */
+    const size_t n = (k < F) ? k : F;
+    double complex *G = calloc(n * n, sizeof *G);
+    double *T = calloc(4 * n * n, sizeof *T);       /* the 2n-by-2n real form */
+    double *ev = malloc(2 * n * sizeof *ev);
+    double *sv = malloc(n * sizeof *sv);
+    if (!G || !T || !ev || !sv) {
+        free(A); free(G); free(T); free(ev); free(sv);
+        return RS_ERR_ALLOC;
+    }
+
+    if (k < F) {
+        for (size_t a = 0; a < k; a++)
+            for (size_t b = 0; b < k; b++) {
+                double complex s = 0.0;
+                for (size_t j = 0; j < F; j++) s += A[a * F + j] * conj(A[b * F + j]);
+                G[a * n + b] = s;
+            }
+    } else {
+        for (size_t a = 0; a < F; a++)
+            for (size_t b = 0; b < F; b++) {
+                double complex s = 0.0;
+                for (size_t i = 0; i < k; i++) s += conj(A[i * F + a]) * A[i * F + b];
+                G[a * n + b] = s;
+            }
+    }
+
+    /* A Hermitian G = X + iY has the same eigenvalues as the real symmetric
+     * [[X, -Y], [Y, X]], each appearing twice. Using that avoids implementing a
+     * complex Jacobi rotation, whose sign conventions are easy to get subtly
+     * wrong and hard to notice. */
+    const size_t m = 2 * n;
+    for (size_t a = 0; a < n; a++) {
+        for (size_t b = 0; b < n; b++) {
+            const double x = creal(G[a * n + b]), y = cimag(G[a * n + b]);
+            T[a * m + b]                 =  x;
+            T[(a + n) * m + (b + n)]     =  x;
+            T[a * m + (b + n)]           = -y;
+            T[(a + n) * m + b]           =  y;
+        }
+    }
+    rs_jacobi_eigenvalues(T, m, ev);
+    qsort(ev, m, sizeof *ev, rs_cmp_double);
+
+    /* Each eigenvalue is duplicated by the embedding, so take every second one,
+     * and the Gram's eigenvalues are the squared singular values. */
+    for (size_t i = 0; i < n; i++) {
+        const double lam = ev[2 * i];
+        sv[i] = (lam > 0.0) ? sqrt(lam) : 0.0;
+    }
+
+    double hi = 0.0, lo = 0.0;
+    for (size_t i = 0; i < n; i++) if (sv[i] > hi) hi = sv[i];
+    lo = hi;
+    for (size_t i = 0; i < n; i++) if (sv[i] < lo) lo = sv[i];
+
+    size_t rank = 0;
+    if (hi > 0.0) for (size_t i = 0; i < n; i++) if (sv[i] / hi > rank_tol) rank++;
+
+    if (sv_max) *sv_max = hi;
+    if (sv_min) *sv_min = lo;
+    if (condition) *condition = (lo > 0.0) ? hi / lo : INFINITY;
+    if (n_rank) *n_rank = rank;
+
+    free(A); free(G); free(T); free(ev); free(sv);
+    return RS_OK;
+}
+
 /* Median of 'n' doubles, sorting a caller-supplied scratch buffer in place.
  *
  * Insertion sort because 'n' is the depth-cell count -- tens, not thousands --
@@ -894,6 +1042,31 @@ void rs_tomo_write_metadata(const rs_tomo_t *t, void *stream)
     fprintf(f, "incidence_deg         %g\n", t->params.incidence * 180.0 / M_PI);
     fprintf(f, "depth_resolution_m    %g\n", t->dT);
     fprintf(f, "depth_unambiguous_m   %g\n", t->z_unambiguous);
+
+    /* How invertible the operator that produced this cube actually was.
+     *
+     * Recorded here rather than left to be recomputed, because it is the one
+     * number that says whether the depth cells in this product are resolved or
+     * interpolated, and it is derivable from geometry alone -- so a reader can
+     * check it against the cube's own dimensions without the collect. */
+    {
+        double smax = 0.0, smin = 0.0, cond = 0.0;
+        size_t rank = 0;
+        if (t->n_looks > 0 && t->n_depth > 0 &&
+            rs_tomo_conditioning(&t->params, t->n_looks, t->n_depth, 1e-3,
+                                 &smax, &smin, &cond, &rank) == RS_OK) {
+            fprintf(f, "steering_condition    %g\n", cond);
+            fprintf(f, "steering_rank         %zu of %zu depth cells "
+                       "(%zu sub-apertures)\n", rank, t->n_depth, t->n_looks);
+            if (rank < t->n_depth) {
+                fprintf(f,
+                    "  Only %zu of the %zu depth cells above are independently\n"
+                    "  resolved by this geometry. The rest are interpolation\n"
+                    "  between them, not measurement, whatever the profile\n"
+                    "  looks like.\n", rank, t->n_depth);
+            }
+        }
+    }
     fprintf(f, "n_sub_apertures       %zu\n", t->n_looks);
     fprintf(f, "depth_cell_m          %g\n", t->params.depth_cell);
     fprintf(f, "depth_max_m           %g\n", t->params.depth_max);

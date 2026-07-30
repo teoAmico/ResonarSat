@@ -410,6 +410,39 @@ resonarsat_status_t rs_tomo_sweep_summary_reliable(const rs_tomo_sweep_row_t *ro
                                                    double *slope, double *correlation,
                                                    size_t *n_used);
 
+/* Measure how invertible the steering matrix is, from geometry alone.
+ *
+ * WHY THIS IS WORTH A FUNCTION. This file argues at length that the depth stage
+ * rests on an along-track baseline, that such a baseline is not an elevation
+ * baseline, and that whether it carries depth information is the method's
+ * principal open question. rs_tomo_model_a_lstsq() reasons about the rank of A
+ * and refuses a singular solve. Neither of those MEASURES the thing.
+ *
+ * This does, and it needs no data: A is built from the geometry and the depth
+ * grid, so its singular values are available before a single pulse is read. If
+ * the effective rank is far below the number of depth cells requested, the
+ * operator cannot resolve those cells whatever the scene contains, and every
+ * profile it produces is a smooth interpolation of a handful of independent
+ * numbers. That is a statement worth having attached to a tomogram.
+ *
+ * 'n_looks' is the sub-aperture count the inversion will run at, and 'n_depth'
+ * the depth cells. Writes the largest and smallest singular values, their ratio,
+ * and the count of singular values above 'rank_tol' times the largest --
+ * 1e-3 is the conventional choice and is what the metadata sidecar uses.
+ *
+ * NOTE THAT F > k IS SINGULAR BY CONSTRUCTION. Asking for more depth cells than
+ * sub-apertures gives a matrix of rank at most k; the extra cells are
+ * interpolation, not resolution. In that case the singular values reported are
+ * the k that exist, and 'n_rank' is bounded by k rather than by n_depth.
+ *
+ * Returns RS_ERR_ARG on a NULL argument or a zero dimension, RS_ERR_ALLOC if
+ * the working matrices cannot be sized. */
+resonarsat_status_t rs_tomo_conditioning(const rs_tomo_params_t *params,
+                                         size_t n_looks, size_t n_depth,
+                                         double rank_tol, double *sv_max,
+                                         double *sv_min, double *condition,
+                                         size_t *n_rank);
+
 /* The stacked-profile contrast: the peak of the summed depth profile over its
  * median.
  *

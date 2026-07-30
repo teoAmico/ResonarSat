@@ -573,6 +573,68 @@ int main(void)
          * in the ctest log. */
     }
 
+    /* ------------------------------------------------------------------
+     * How invertible the steering matrix is, measured rather than argued.
+     * ------------------------------------------------------------------ */
+    RS_CASE("steering-matrix conditioning matches what the geometry implies");
+    {
+        double smax = 0.0, smin = 0.0, cond = 0.0;
+        size_t rank = 0;
+
+        /* Asking for more depth cells than sub-apertures cannot resolve them:
+         * the matrix has rank at most k whatever F is. The code says so in a
+         * comment beside the pseudoinverse; this measures it. */
+        RS_CHECK_OK(rs_tomo_conditioning(&p, 16, 64, 1e-3, &smax, &smin, &cond, &rank));
+        printf("    16 looks, 64 cells: rank %zu, condition %.3g\n", rank, cond);
+        RS_CHECK(rank <= 16);
+
+        /* Square and overdetermined cases should be honestly rankful. A DFT-like
+         * operator on a matched grid is perfectly conditioned; the interest is
+         * in how fast that degrades as the depth grid is oversampled. */
+        RS_CHECK_OK(rs_tomo_conditioning(&p, 64, 16, 1e-3, &smax, &smin, &cond, &rank));
+        printf("    64 looks, 16 cells: rank %zu, condition %.3g\n", rank, cond);
+        RS_CHECK(rank == 16);
+        RS_CHECK(isfinite(cond));
+
+        /* The sweep that matters for a caller: at a fixed look count, how many
+         * depth cells are actually independent? A cube whose cell count runs
+         * far past this is drawing interpolation. */
+        printf("    at 32 looks:");
+        for (size_t F = 8; F <= 128; F *= 2) {
+            RS_CHECK_OK(rs_tomo_conditioning(&p, 32, F, 1e-3, &smax, &smin, &cond, &rank));
+            printf("  %zu cells -> rank %zu", F, rank);
+        }
+        printf("\n");
+
+        /* The diagnostic has to be sensitive to something, or a reassuring
+         * number means nothing. Oversampling the depth grid -- cells finer than
+         * the resolution the geometry supports -- correlates the columns of A
+         * and must show up here. rs_tomo_params_check() refuses that at focus
+         * time, so this is a probe of the regime the guard exists to prevent,
+         * and a check that the guard is guarding something real. */
+        printf("    32 looks, 32 cells, cell size vs resolution %.2f m:\n", dT);
+        size_t first_rank = 0, last_rank = 0, prev_rank = 33;
+        for (double cell = dT; cell >= dT / 16.0; cell /= 4.0) {
+            rs_tomo_params_t q = p;
+            q.depth_cell = cell;
+            RS_CHECK_OK(rs_tomo_conditioning(&q, 32, 32, 1e-3,
+                                             &smax, &smin, &cond, &rank));
+            printf("      cell %.4f m (%.2f x dT): rank %2zu, condition %.4g\n",
+                   cell, cell / dT, rank, cond);
+            /* Rank, not condition: once the matrix is singular the ratio is
+             * infinite and no longer orders the cases. */
+            RS_CHECK(rank <= prev_rank);
+            if (first_rank == 0) first_rank = rank;
+            last_rank = rank;
+            prev_rank = rank;
+        }
+        RS_CHECK(last_rank < first_rank / 2);
+
+        /* A degenerate request must be refused rather than answered. */
+        RS_CHECK_ERR(rs_tomo_conditioning(&p, 0, 16, 1e-3, &smax, &smin, &cond, &rank),
+                     RS_ERR_ARG);
+    }
+
     RS_CASE("grid extent does NOT separate them -- kept as a negative result");
     {
         /* A reflector 1.4x beyond the unambiguous depth at 64 looks folds to
