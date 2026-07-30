@@ -741,6 +741,108 @@ resonarsat_status_t rs_tomo_focus(const rs_microm_t *m,
     return st;
 }
 
+/* Median of 'n' doubles, sorting a caller-supplied scratch buffer in place.
+ *
+ * Insertion sort because 'n' is the depth-cell count -- tens, not thousands --
+ * and it is called once per null trial. The scratch buffer is a parameter so a
+ * few hundred trials do not each allocate. */
+static double rs_tomo_median_scratch(const double *v, size_t n, double *scratch)
+{
+    if (n == 0) return 0.0;
+    memcpy(scratch, v, n * sizeof *scratch);
+    for (size_t i = 1; i < n; i++) {
+        const double key = scratch[i];
+        size_t j = i;
+        while (j > 0 && scratch[j - 1] > key) { scratch[j] = scratch[j - 1]; j--; }
+        scratch[j] = key;
+    }
+    return (n % 2) ? scratch[n / 2]
+                   : 0.5 * (scratch[n / 2 - 1] + scratch[n / 2]);
+}
+
+/* Contrast of a stacked depth profile: peak over median. */
+static double rs_tomo_contrast_of(const double *prof, size_t n_depth, double *scratch)
+{
+    double peak = 0.0;
+    for (size_t d = 0; d < n_depth; d++) if (prof[d] > peak) peak = prof[d];
+    const double med = rs_tomo_median_scratch(prof, n_depth, scratch);
+    if (!(med > 0.0)) return 0.0;
+    return peak / med;
+}
+
+/* The stacked-profile contrast of a tomogram. */
+double rs_tomo_stack_contrast(const rs_tomo_t *t)
+{
+    if (!t || !t->profile || t->n_depth == 0 || t->n_win == 0) return 0.0;
+    double *prof = calloc(t->n_depth, sizeof *prof);
+    double *scratch = malloc(t->n_depth * sizeof *scratch);
+    if (!prof || !scratch) { free(prof); free(scratch); return 0.0; }
+
+    for (size_t w = 0; w < t->n_win; w++) {
+        const double *p = t->profile + w * t->n_depth;
+        for (size_t d = 0; d < t->n_depth; d++) prof[d] += p[d];
+    }
+    const double c = rs_tomo_contrast_of(prof, t->n_depth, scratch);
+    free(prof); free(scratch);
+    return c;
+}
+
+/* Circularly shift each window's profile independently and restack. */
+resonarsat_status_t rs_tomo_alignment_null(const rs_tomo_t *t, size_t trials,
+                                           unsigned seed, double *real_out,
+                                           double *mean, double *sd, double *max_out,
+                                           size_t *n_ge)
+{
+    if (!t || !t->profile || trials == 0 || t->n_depth == 0 || t->n_win == 0) {
+        rs_set_error("tomo alignment null: needs a populated tomogram and "
+                     "a positive trial count");
+        return RS_ERR_ARG;
+    }
+
+    const size_t nz = t->n_depth;
+    double *prof = malloc(nz * sizeof *prof);
+    double *scratch = malloc(nz * sizeof *scratch);
+    if (!prof || !scratch) { free(prof); free(scratch); return RS_ERR_ALLOC; }
+
+    const double real = rs_tomo_stack_contrast(t);
+
+    double sum = 0.0, sum2 = 0.0, hi = 0.0;
+    size_t ge = 0;
+    unsigned st = seed ? seed : 1u;
+
+    for (size_t i = 0; i < trials; i++) {
+        memset(prof, 0, nz * sizeof *prof);
+        for (size_t w = 0; w < t->n_win; w++) {
+            /* xorshift, so a seeded run repeats across platforms, matching
+             * rs_shuffle_looks(). */
+            st ^= st << 13; st ^= st >> 17; st ^= st << 5;
+            const size_t shift = (size_t)(st % (unsigned)nz);
+            const double *p = t->profile + w * nz;
+            /* prof[d] += p[(d - shift) mod nz], i.e. the profile rolled forward
+             * by 'shift' -- its samples are preserved exactly, only relabelled
+             * in depth. */
+            for (size_t d = 0; d < nz; d++) {
+                prof[d] += p[(d + nz - shift) % nz];
+            }
+        }
+        const double c = rs_tomo_contrast_of(prof, nz, scratch);
+        sum += c; sum2 += c * c;
+        if (c > hi) hi = c;
+        if (c >= real) ge++;
+    }
+
+    free(prof); free(scratch);
+
+    const double m = sum / (double)trials;
+    const double var = sum2 / (double)trials - m * m;
+    if (real_out) *real_out = real;
+    if (mean) *mean = m;
+    if (sd) *sd = var > 0.0 ? sqrt(var) : 0.0;
+    if (max_out) *max_out = hi;
+    if (n_ge) *n_ge = ge;
+    return RS_OK;
+}
+
 /* Emit the parameters and derived constants that must travel with a tomogram. */
 void rs_tomo_write_metadata(const rs_tomo_t *t, void *stream)
 {

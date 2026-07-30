@@ -410,6 +410,50 @@ resonarsat_status_t rs_tomo_sweep_summary_reliable(const rs_tomo_sweep_row_t *ro
                                                    double *slope, double *correlation,
                                                    size_t *n_used);
 
+/* The stacked-profile contrast: the peak of the summed depth profile over its
+ * median.
+ *
+ * This is the quantity a tomogram is read for. Summing every window's profile
+ * and asking how peaked the result is asks whether the windows AGREE about a
+ * depth -- which is the only thing that distinguishes a structure at depth from
+ * each window's own artefacts, since a per-window profile always has peaks in
+ * it. A flat stack scores near 1. */
+double rs_tomo_stack_contrast(const rs_tomo_t *t);
+
+/* THE ALIGNMENT NULL. Circularly shift each window's depth profile by an
+ * independent random amount, restack, and measure the contrast again.
+ *
+ * WHY THIS AND NOT A SHUFFLE. rs_shuffle_looks() destroys the sub-look time
+ * order and rebuilds everything downstream, which changes each window's profile
+ * as well as their agreement -- so it tests the whole chain at once and cannot
+ * say which half carried the result. This holds every window's profile EXACTLY,
+ * to a rotation: the same peaks, the same widths, the same sidelobes, the same
+ * artefacts of steering and windowing. The only thing destroyed is the depth at
+ * which each window's profile sits, and therefore the agreement between windows.
+ *
+ * That makes it the specific null for the depth stage's specific claim. A
+ * tomogram whose contrast survives this is one where the windows independently
+ * picked the same depth. A tomogram whose contrast collapses to the null was
+ * reporting the average shape of per-window artefacts, which every scene has.
+ *
+ * The independent reproduction at github.com/Hassanforeman/subsurface-sar-tomo
+ * arrived at this null separately and reports, in its own steering stress tests,
+ * a wrong-shallow-depth case with high contrast that "the look-shuffle null does
+ * NOT catch". This project has now seen the same class of failure on the
+ * micro-motion side, where a phase measurement cleared 32 shuffles at p = 0.03
+ * while measuring nothing -- see runs/giza/2026-07-30-uniform-phase-khufu. A
+ * null that does not hold the right thing fixed gives false confidence at both
+ * stages.
+ *
+ * 'seed' selects the permutation so a run repeats. Writes the real contrast and
+ * the null distribution's mean, standard deviation and maximum, plus how many of
+ * 'trials' reached the real value. Returns RS_ERR_ARG on a NULL argument or zero
+ * trials, RS_ERR_ALLOC if the working buffers cannot be sized. */
+resonarsat_status_t rs_tomo_alignment_null(const rs_tomo_t *t, size_t trials,
+                                           unsigned seed, double *real_out,
+                                           double *mean, double *sd, double *max_out,
+                                           size_t *n_ge);
+
 /* Write the parameters and derived constants of a tomogram as text, one field
  * per line, to an open stream. Used for the sidecar file that accompanies every
  * exported product and for the CLI's summary. */

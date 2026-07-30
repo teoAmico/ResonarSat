@@ -1736,7 +1736,23 @@ static int rs_cmd_tomo(int argc, char **argv)
                "                       [--no-window] [--keep-mean] [--regularisation F]\n"
                "                       [--eq22-literal-t VALUE (experimental)]\n"
                "                       [--geocode FILE.csv] [--patent-exact]\n"
+               "                       [--null-align N] [--null-align-seed S]\n"
                "                       [--no-optimize]\n"
+               "\n"
+               "--null-align is THE DEPTH STAGE'S OWN NULL TEST, and the one to\n"
+               "run before believing a tomogram. It circularly shifts each\n"
+               "window's depth profile by an independent random amount and\n"
+               "restacks. Every profile is preserved exactly -- same peaks, same\n"
+               "widths, same artefacts of steering and windowing -- so the only\n"
+               "thing destroyed is the depth at which each window's profile sits,\n"
+               "and therefore whether the windows AGREE. A contrast that survives\n"
+               "means the windows independently picked the same depth. One that\n"
+               "collapses means the stack was reporting the average shape of\n"
+               "per-window artefacts, which every scene has.\n"
+               "\n"
+               "A shuffle of the sub-look order is the wrong instrument here: it\n"
+               "changes each window's profile as well as their agreement, so it\n"
+               "cannot say which half carried the result.\n"
                "                       [--out FILE] [--section N --section-out FILE.png]\n"
                "\n"
                "--velocity and --frequency are REQUIRED and have no defaults.\n"
@@ -2185,6 +2201,48 @@ static int rs_cmd_tomo(int argc, char **argv)
             "         clutter often tracks near 0.1; pass --coherence 0 to see an\n"
             "         unmasked result, and treat what comes back accordingly.\n",
             mp.coherence_min);
+    }
+
+    /* The alignment null, the depth stage's own null test.
+     *
+     * Run here, before any product is written, because a tomogram that cannot
+     * clear it should not be exported without the number beside it. See
+     * rs_tomo_alignment_null() for why a shuffle of the sub-look order is the
+     * wrong instrument at this stage: it changes each window's profile as well
+     * as their agreement, so it cannot say which half carried the result. */
+    {
+        const size_t atrials = (size_t)rs_opt_double(argc, argv, "--null-align", 0.0);
+        if (atrials > 0) {
+            double real = 0.0, nm = 0.0, nsd = 0.0, nmax = 0.0;
+            size_t nge = 0;
+            const unsigned aseed =
+                (unsigned)rs_opt_double(argc, argv, "--null-align-seed", 1.0);
+            if (rs_tomo_alignment_null(&tomo, atrials, aseed,
+                                       &real, &nm, &nsd, &nmax, &nge) == RS_OK) {
+                printf("\nALIGNMENT NULL from %zu re-alignments of the per-window "
+                       "depth profiles:\n", atrials);
+                printf("  stacked contrast %.2f;  null mean %.2f, sd %.2f, worst %.2f\n",
+                       real, nm, nsd, nmax);
+                printf("  %.2fx the mean and %.2fx the worst\n",
+                       nm > 0.0 ? real / nm : 0.0, nmax > 0.0 ? real / nmax : 0.0);
+                printf("  %zu of %zu reached it -- empirical p = %.4f\n",
+                       nge, atrials, (double)(nge + 1) / (double)(atrials + 1));
+                if (nge > 0) {
+                    printf("  RE-ALIGNING THE SAME PROFILES AT RANDOM DEPTHS REACHED\n"
+                           "  THIS CONTRAST. The windows do not agree about a depth,\n"
+                           "  so the stack is reporting the average shape of their\n"
+                           "  own artefacts. This is not a depth measurement.\n");
+                } else {
+                    printf("  No re-alignment reached it. The windows agree about a\n"
+                           "  depth to a degree random alignment does not reproduce --\n"
+                           "  which is necessary for a depth claim and not sufficient\n"
+                           "  for one: the depth axis is still set by the assumed\n"
+                           "  (v, f) above, which nothing here measures.\n");
+                }
+            } else {
+                rs_report_error("tomo", RS_ERR_ARG);
+            }
+        }
     }
 
     /* Per-window diagnostic dump.

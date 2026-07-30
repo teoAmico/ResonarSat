@@ -506,5 +506,71 @@ int main(void)
         free(buf);
     }
 
+    /* THE ALIGNMENT NULL, tested from both sides.
+     *
+     * A null that only fires on garbage is useless, and so is one that never
+     * fires. So this builds two tomograms out of the SAME per-window profile
+     * shape -- one sharp Gaussian peak per window, identical in width and
+     * amplitude -- and changes nothing but where each window puts it.
+     *
+     * Aligned, every window peaks at the same depth and the stack is sharp.
+     * Scattered, every window peaks somewhere different and the stack is flat.
+     * The alignment null must separate those two, because that difference is
+     * the entire claim a tomogram makes. */
+    RS_CASE("the alignment null separates agreeing windows from scattered ones");
+    {
+        const size_t n_win = 40, n_depth = 64;
+        double *aligned = malloc(n_win * n_depth * sizeof *aligned);
+        double *scattered = malloc(n_win * n_depth * sizeof *scattered);
+        RS_CHECK(aligned != NULL && scattered != NULL);
+
+        unsigned s = 99u;
+        for (size_t w = 0; w < n_win; w++) {
+            s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+            const size_t own = (size_t)(s % (unsigned)n_depth);
+            for (size_t d = 0; d < n_depth; d++) {
+                /* One identical peak shape, placed at a common depth in the
+                 * first cube and at each window's own depth in the second. */
+                const double da = (double)d - 20.0;
+                const double ds = (double)d - (double)own;
+                aligned[w * n_depth + d]   = 0.05 + exp(-0.5 * da * da / 4.0);
+                scattered[w * n_depth + d] = 0.05 + exp(-0.5 * ds * ds / 4.0);
+            }
+        }
+
+        rs_tomo_t ta = { .profile = aligned, .n_win = n_win, .n_depth = n_depth };
+        rs_tomo_t ts = { .profile = scattered, .n_win = n_win, .n_depth = n_depth };
+
+        double ra = 0.0, ma = 0.0, sda = 0.0, hia = 0.0;
+        double rs_ = 0.0, ms = 0.0, sds = 0.0, his = 0.0;
+        size_t gea = 0, ges = 0;
+        RS_CHECK_OK(rs_tomo_alignment_null(&ta, 200, 7u, &ra, &ma, &sda, &hia, &gea));
+        RS_CHECK_OK(rs_tomo_alignment_null(&ts, 200, 7u, &rs_, &ms, &sds, &his, &ges));
+
+        printf("    aligned  : real %.2f  null mean %.2f  worst %.2f  reached %zu/200\n",
+               ra, ma, hia, gea);
+        printf("    scattered: real %.2f  null mean %.2f  worst %.2f  reached %zu/200\n",
+               rs_, ms, his, ges);
+
+        /* Agreeing windows must stand clear of their own null and no shuffle of
+         * their alignment should reach them. */
+        RS_CHECK(ra > 3.0 * ma);
+        RS_CHECK(gea == 0);
+
+        /* Scattered windows must NOT. Their real contrast is one draw from the
+         * same distribution the null samples, so trials should routinely reach
+         * it -- this is the half that fails if the null is merely destructive. */
+        RS_CHECK(rs_ < 3.0 * ms);
+        RS_CHECK(ges > 0);
+
+        /* The shift preserves each profile exactly, so the null's own mean
+         * cannot depend on which cube it came from: both are the same peak in
+         * random places. */
+        RS_CHECK_REL(ma, ms, 0.25);
+
+        free(aligned);
+        free(scattered);
+    }
+
     RS_TEST_END();
 }
