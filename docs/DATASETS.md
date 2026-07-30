@@ -143,6 +143,59 @@ Resources:
 - Imaging modes: https://sar.iceye.com/latest/productspecification/imagingmodes/
 - Product formats: https://sar.iceye.com/latest/productspecification/dataproducts/
 
+## Corner reflectors: searched for, and not in any open archive
+
+The one thing this project cannot get from an image alone is a target whose
+motion is independently known. Every validated micro-motion result in the
+literature uses a corner reflector, so the obvious question is whether any open
+collect contains one.
+
+**ESA's EDAP assessment of Capella** (EDAP.REP.072, Telespazio for ESA, 2022)
+confirms the data exists. It characterises the Capella impulse response over the
+**Rosamond calibration site in California**, which carries 38 permanently
+installed corner reflectors -- 23 with a 2.4 m leg, 5 with 4.8 m, 10 with 0.7 m
+-- and it names 29 acquisitions used, by full product ID and timestamp, such as
+`CAPELLA_C03_SP_SLC_HH_20210409054258_20210409054302`.
+
+None of it is public. Searched exhaustively on 2026-07-31:
+
+| archive | items scanned | over the Rosamond box |
+|---|---|---|
+| Capella open data, CPHD | 1174 | **0** |
+| Capella open data, SICD | 1504 | **0** |
+| Umbra open data, all acquisitions | 2809 | **0** |
+
+The box was generous, 34.65-35.05 N by 118.35-117.85 W. The named acquisitions
+are not in the bucket either -- `data/2021/4/9/` and `data/2021/4/15/` are empty
+-- which matches the assessment's own statement that the products were "provided
+directly from the Capella team".
+
+Rosamond is public infrastructure and its reflector positions are published, so
+the obstacle is coverage rather than secrecy: neither open archive happens to
+contain a collect over it. Getting one means a tasking request or an approved
+data request, not a download.
+
+### What the assessment is still worth
+
+Three measured numbers that apply to the Capella products this project does use:
+
+- **Azimuth sidelobes are high by design.** "Azimuth window is a rectangular
+  window for SP and SS products resulting in a PSLR of about -13 dB", and "the
+  azimuth antenna pattern is not compensated in the CAPELLA products". Measured
+  on a spotlight acquisition: azimuth PSLR **-13.23 dB**, range PSLR -31.3 dB.
+  That is a 5% amplitude sidelobe in azimuth on every Capella product, and it
+  bears directly on the correlation-peak hopping documented in
+  `runs/giza/2026-07-30-validated-spot-khufu/POSITIVE-CONTROL.md`.
+- **Geolocation is good to about 1.5 m.** Absolute localisation error for
+  spotlight: mean -0.73 m azimuth, 0.38 m range, standard deviations 1.5-1.6 m,
+  never worse than 7.6 m. So a grid landing tens or hundreds of metres from its
+  coordinates is this project's transform, not the product -- which is what the
+  Capella SGN mirror in `readers/cphd.c` turned out to be.
+- **Absolute radiometric calibration is suspect.** "The measured NESZ level is
+  lower than the values reported in the products' annotations, suggesting a
+  possible residual error in the absolute radiometric calibration." One more
+  reason amplitudes from these products are labelled qualitative here.
+
 ## X-band data requiring approval or purchase
 
 | provider | complex products | access |
