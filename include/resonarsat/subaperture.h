@@ -191,7 +191,48 @@ typedef struct {
  *
  * Those last two travel together deliberately. Reporting an observable
  * vibration band without the resolution it cost is how a 30-metre result gets
- * mistaken for a 1-metre one. */
+ * mistaken for a 1-metre one.
+ *
+ * THE PRF IS NOT CONSTANT, AND 'dt' PRETENDS IT IS. Rollo and Clemente,
+ * "Parametric Sparse Representation of Target Vibrations in SAR Using
+ * Orthogonal Matching Pursuit" (EUSIPCO 2025), take the per-pulse transmit and
+ * receive times out of the CPHD metadata and show the instantaneous PRF varying
+ * smoothly across a Capella acquisition; they call handling it "crucial", and
+ * warn that assuming a linearly spaced time axis builds "an ill fitting
+ * dictionary".
+ *
+ * Measured on this project's own Giza collect, that is real but small:
+ *
+ *   PRI percentiles      97.70 / 97.98 / 98.80 us  (1st, 50th, 99th)
+ *   so the PRF spans     about 1.1%, systematically rather than as jitter
+ *   cumulative departure from a uniform time grid: 23.8 ms, at pulse 265348
+ *     = 0.072% of the 32.87 s dwell, and 242 pulse intervals
+ *     = 12% of one sub-aperture step at the 159-look configuration
+ *
+ * What that costs a SPECTRUM is less than it sounds. A smooth time-base
+ * distortion of 23.8 ms over half the dwell is a slope of 0.00145, so a
+ * frequency is smeared by 0.145%: 0.0037 Hz at the 2.53 Hz band edge, against a
+ * 0.0318 Hz bin. A tenth of a bin. Below the resolution everywhere in the band,
+ * which is why nothing here corrects for it.
+ *
+ * What it costs a COHERENT PHASE FIT is not small, and is why that paper needed
+ * the true timings and this code does not: 23.8 ms is 0.30 rad of accumulated
+ * phase error at 2 Hz. A method that fits one phase model across the whole
+ * aperture pays that in full; a periodogram of a sub-look series does not.
+ *
+ * The two routes are already inconsistent about this and it is worth knowing
+ * which is which. rs_subaperture_from_cphd() sets centre_time from the actual
+ * pulse times, cphd->t[]; rs_subaperture_split() lays them on t0 + i*dt because
+ * it works from a focused image and has no pulse axis left to consult. Both
+ * derive 'dt' itself -- and therefore f_max and every frequency axis downstream
+ * -- from a nominal constant PRF.
+ *
+ * There is also one genuine GAP rather than a drift: the reader skips 8
+ * vectors flagged invalid on this collect, leaving a hole of about nine pulse
+ * intervals. The same paper warns that "significant gaps between pulses would
+ * introduce clipping effects that compromise accuracy". Nine intervals out of
+ * 335,141 is not significant by that standard, but the mechanism is real and a
+ * collect with more dropped vectors would need checking rather than assuming. */
 typedef struct {
     rs_slc_t *look;
     /* The slave of each pair, offset from look[i] by b_shift_hz, or NULL when
