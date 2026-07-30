@@ -354,15 +354,59 @@ identically zero by construction. Here nothing is masked, every window carries a
 series, every series clears the quantisation floor, and they are all garbage.
 The tracker has stopped declining and started producing.
 
-### What this run establishes
+### WITHDRAWN: this run does not establish anything about Khufu
 
-**At the aperture fraction with LVDT-validated results behind it, Khufu does not
-correlate between sub-apertures.** That is a statement about the target, not
-about the parameters, and it is the first such statement this project has been
-able to make -- every earlier null was confounded by a configuration nobody had
-validated.
+**The paragraph that stood here claimed the null was attributable to the target
+rather than the configuration. A positive control run afterwards shows that it
+is not, and the claim is withdrawn rather than edited, because it was wrong in
+the direction that flatters the work.**
 
-Two supporting details make it hard to blame the processing:
+The control put a known vibrating target through this exact configuration --
+`--subap uniform --overlap 0.88 --estimator correlation --n 159 --win 32
+--upsample 40`, aperture fraction 5.01% against this run's 5.00% -- on a clean
+synthetic collect with no clutter and nothing else in the scene. Target at
+0.5 Hz, observation ratio 0.50, inside the 0.39-0.69 range the published
+validation works at, injected displacement 4.19 px peak-to-peak against a
+0.061 px quantisation floor.
+
+The four windows containing the target returned:
+
+```
+  win 180  quality 0.087  p2p 30.90 px  dominant 1.203 Hz
+  win 181  quality 0.116  p2p 10.48 px  dominant 1.569 Hz
+  win 199  quality 0.078  p2p 32.00 px  dominant 1.046 Hz
+  win 200  quality 0.082  p2p 31.93 px  dominant 0.785 Hz
+```
+
+None recovers 0.5 Hz. Excursions sit at the full 32-pixel window width and
+quality at 0.08-0.12 -- the same signature, and the same numbers, this run
+reported over Khufu. **A configuration that cannot find a bright isolated target
+vibrating at a known frequency on an empty synthetic scene says nothing about a
+pyramid.**
+
+What is NOT established is why. The candidates are the uniform spectral-split
+route, the 0.88 overlap, the window size against the 1.02 m sub-look resolution,
+and an outright defect in this implementation of the chain. Distinguishing them
+is the next work, and until it is done every number above is uninterpretable
+rather than negative.
+
+### A second defect in this configuration, found by the same control
+
+The sub-aperture response nulls at integer observation ratios, `eta = t_sap * f`.
+This run's `t_sap` is 1.643 s, so within its own 2.53 Hz observable band there
+are nulls at **0.609, 1.217, 1.826 and 2.435 Hz** -- and `eta < 1` only below
+0.609 Hz. The configuration was therefore blind to displacement above about
+0.6 Hz before the scene was even considered, which is not something this run
+recorded or the band figure printed alongside it suggests.
+
+That is the same class of defect the patent chain was criticised for in
+`2026-07-29-patent-exact-true-khufu`, where every resolvable bin sat at an
+integer observation ratio. It is milder here -- four nulls rather than all of
+them -- but it was found by accident, in a control whose first attempt injected
+1.0 Hz against a 1.002 s sub-aperture and landed exactly on a null.
+
+Two details that were offered as making it hard to blame the processing, and
+that the control shows do not carry that weight:
 
 - **The displacement-averaging problem is gone.** Sub-aperture response is 0.9820,
   which is -0.2 dB, at an observation ratio of 0.10. The mechanism that made the
@@ -372,13 +416,11 @@ Two supporting details make it hard to blame the processing:
   resolution on a 1.0 m grid, so the tracking images are neither aliased nor
   smeared, unlike every previous Giza run.
 
-The remaining explanation is the scene. The validated campaigns track a corner
-reflector -- an engineered point scatterer with high contrast against an open
-field, deliberately sited to avoid clutter. Khufu is a 230 m limestone massif of
-distributed, self-similar scatterers whose sub-look speckle decorrelates between
-looks that share 88% of their bandwidth. A method demonstrated on the former does
-not transfer to the latter, and this run is the measurement of that gap rather
-than an argument about it.
+That reasoning was wrong, and the control is why. An engineered corner reflector
+on an empty field is exactly what the synthetic control provides -- a single
+bright point, no clutter, no speckle to decorrelate -- and the configuration
+failed on it too. So "the scene" cannot be the remaining explanation. Whatever
+defeats this configuration defeats it on the easiest target there is.
 
 ## Was the correlation failure our own interpolator? No.
 
