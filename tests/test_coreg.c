@@ -100,6 +100,87 @@ int main(void)
         RS_CHECK_ERR(rs_coreg_shift(ref, cur, 0, n, 1, 1, &sa, &sr, &pk), RS_ERR_ARG);
     }
 
+    /* --no-optimize's audit path. The whole value of a baseline is that it agrees
+     * with the fast path on cases where the fast path is known to be right, so
+     * that a disagreement elsewhere means something. Tested to one lattice step
+     * rather than exactly: the two search the same lattice but arrive by
+     * different arithmetic -- a padded transform against a direct summation --
+     * and single-precision rounding can put the crest one step either way when
+     * two neighbouring points are within an ulp of each other. */
+    RS_CASE("exhaustive search agrees with local refinement on clean shifts");
+    {
+        const size_t up = 20;
+        const double tol = 1.5 / (double)up;
+        const double shifts[][2] = { {0,0}, {1,0}, {0,1}, {2,-3}, {0.25,0},
+                                     {-0.4,0.5}, {1.3,-1.75} };
+        for (size_t i = 0; i < sizeof shifts / sizeof shifts[0]; i++) {
+            make_patch(ref, n, 16.0, 16.0, sigma);
+            make_patch(cur, n, 16.0 + shifts[i][0], 16.0 + shifts[i][1], sigma);
+            demean(ref, n); demean(cur, n);
+
+            double la = 0, lr = 0, lpk = 0, xa = 0, xr = 0, xpk = 0;
+            RS_CHECK_OK(rs_coreg_shift_ex(ref, cur, n, n, up, up,
+                                          RS_COREG_REFINE_LOCAL, &la, &lr, &lpk));
+            RS_CHECK_OK(rs_coreg_shift_ex(ref, cur, n, n, up, up,
+                                          RS_COREG_REFINE_EXHAUSTIVE, &xa, &xr, &xpk));
+
+            /* Against the truth, so a bug that moved both paths equally cannot
+             * pass by having them agree with each other. */
+            RS_CHECK_NEAR(xa, shifts[i][0], 0.15);
+            RS_CHECK_NEAR(xr, shifts[i][1], 0.15);
+            RS_CHECK_NEAR(xa, la, tol);
+            RS_CHECK_NEAR(xr, lr, tol);
+            /* The normalisations must match too, or the coherence mask would
+             * threshold two different quantities depending on the mode. */
+            RS_CHECK_NEAR(xpk, lpk, 0.02);
+        }
+    }
+
+    /* The exhaustive path must land on the same 1/upsample lattice as the local
+     * one. A padding or index-unwrap error would still produce plausible shifts,
+     * just off the lattice -- which is invisible in a tolerance check. */
+    RS_CASE("exhaustive shifts land on the 1/upsample lattice");
+    {
+        const size_t up = 8;
+        make_patch(ref, n, 16.0, 16.0, sigma);
+        make_patch(cur, n, 16.0 + 0.375, 16.0 - 1.25, sigma);
+        demean(ref, n); demean(cur, n);
+
+        double sa = 0, sr = 0, pk = 0;
+        RS_CHECK_OK(rs_coreg_shift_ex(ref, cur, n, n, up, up,
+                                      RS_COREG_REFINE_EXHAUSTIVE, &sa, &sr, &pk));
+        RS_CHECK_NEAR(sa * (double)up, round(sa * (double)up), 1e-9);
+        RS_CHECK_NEAR(sr * (double)up, round(sr * (double)up), 1e-9);
+    }
+
+    /* A degenerate patch must mask itself out on this path too. The exhaustive
+     * branch returns before the search, so this checks the early exit is shared
+     * rather than duplicated and forgotten. */
+    RS_CASE("exhaustive search masks out a blank patch");
+    {
+        for (size_t i = 0; i < n * n; i++) { ref[i] = 0.0f; cur[i] = 0.0f; }
+        double sa = 1.0, sr = 1.0, pk = 1.0;
+        RS_CHECK_OK(rs_coreg_shift_ex(ref, cur, n, n, 10, 10,
+                                      RS_COREG_REFINE_EXHAUSTIVE, &sa, &sr, &pk));
+        RS_CHECK_NEAR(pk, 0.0, 1e-9);
+        RS_CHECK_NEAR(sa, 0.0, 1e-9);
+        RS_CHECK_NEAR(sr, 0.0, 1e-9);
+    }
+
+    /* An impossible surface must be refused with a described error rather than
+     * attempted. The failure mode this guards is a tracker that returns a
+     * complete result with every window zero. */
+    RS_CASE("an oversized exhaustive surface is refused");
+    {
+        RS_CHECK_ERR(rs_coreg_surface_check(4096, 4096, 64, 64), RS_ERR_RANGE);
+        RS_CHECK_OK(rs_coreg_surface_check(32, 32, 20, 20));
+
+        double sa, sr, pk;
+        RS_CHECK_ERR(rs_coreg_shift_ex(ref, cur, n, n, 4096, 4096,
+                                       RS_COREG_REFINE_EXHAUSTIVE, &sa, &sr, &pk),
+                     RS_ERR_RANGE);
+    }
+
     free(ref);
     free(cur);
     RS_TEST_END();

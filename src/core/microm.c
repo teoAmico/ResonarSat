@@ -45,6 +45,17 @@ void rs_microm_params_default(rs_microm_params_t *params)
      * window that had signal: recovery falls from 5 of 6 to 3 of 6. Enable it
      * on real scenes with distributed clutter, where the premise holds. */
     params->remove_common_mode = 0;
+    /* Optimised path by default.
+     *
+     * ASSIGNED EXPLICITLY, LIKE EVERY FIELD ABOVE, AND THAT IS LOAD-BEARING.
+     * This function does not memset the struct, and its callers declare it
+     * uninitialised on the stack -- so a field added to rs_microm_params_t and
+     * not assigned here holds whatever was there. When this one was first added
+     * and left out, the tracker read a garbage flag and took the exhaustive
+     * correlation path on some runs and not others: test_nullmotion lost its
+     * detections and test_tracking ran for over ten minutes, with nothing in
+     * either output pointing at the cause. Any new field must be assigned here. */
+    params->no_optimize = 0;
 }
 
 /* Median of a scratch array, which this reorders. */
@@ -148,6 +159,23 @@ resonarsat_status_t rs_microm_track(const rs_subap_stack_t *stack,
         return RS_ERR_ARG;
     }
 
+    /* Reject an oversized exhaustive surface HERE, not in the tracking loop.
+     *
+     * The correlator's size ceiling depends only on the window and the upsample
+     * factors, so if it is going to be exceeded it is exceeded for every window
+     * identically. The loop body treats a failed correlation as "this window did
+     * not track" and moves on, which is right for a degenerate patch and wrong
+     * for this: it would return a full, well-formed result in which every single
+     * window is zero, with no indication why. That is the project's signature
+     * failure mode -- a plausible empty product -- so the condition is turned into
+     * a refusal before anything is allocated. */
+    if (params->no_optimize && params->estimator != RS_MICROM_EST_PHASE) {
+        const resonarsat_status_t size_st =
+            rs_coreg_surface_check(win_az, win_rg,
+                                   params->upsample_az, params->upsample_rg);
+        if (size_st != RS_OK) return size_st;
+    }
+
     const size_t stride_az = params->stride_az ? params->stride_az : win_az;
     const size_t stride_rg = params->stride_rg ? params->stride_rg : win_rg;
 
@@ -202,11 +230,28 @@ resonarsat_status_t rs_microm_track(const rs_subap_stack_t *stack,
 
     volatile resonarsat_status_t shared_st = RS_OK;
 
+    /* Which extent the correlator searches. The exhaustive baseline is the half
+     * of --no-optimize that can actually move a number; see
+     * rs_microm_params_t.no_optimize. */
+    const rs_coreg_refine_t refine = params->no_optimize
+                                   ? RS_COREG_REFINE_EXHAUSTIVE
+                                   : RS_COREG_REFINE_LOCAL;
+
     /* Windows are independent, so this is the pipeline's most naturally
      * parallel loop. Each thread allocates its own patch buffers; sharing them
-     * would serialise the whole thing. */
+     * would serialise the whole thing.
+     *
+     * Under --no-optimize the region is suppressed by the 'if' clause rather than
+     * by a second copy of the loop, for the reason given in
+     * rs_focus_backproject_opts(): one body means the arithmetic cannot drift
+     * between the two modes. Note that 'dynamic' scheduling below already makes
+     * the ORDER in which windows are visited unpredictable between runs -- and
+     * that this is harmless, because each window writes only its own slots and
+     * reads nothing another window wrote. The serial mode makes that visitation
+     * order fixed, which is what allows a debugger or a profiler to be pointed at
+     * a particular window. */
 #ifdef _OPENMP
-#pragma omp parallel
+#pragma omp parallel if (!params->no_optimize)
 #endif
     {
         float complex *pref = malloc(win_az * win_rg * sizeof *pref);
@@ -443,9 +488,9 @@ resonarsat_status_t rs_microm_track(const rs_subap_stack_t *stack,
                     }
 
                     double sa = 0.0, sr = 0.0, pk = 0.0;
-                    if (rs_coreg_shift(pref, pcur, win_az, win_rg,
-                                       params->upsample_az, params->upsample_rg,
-                                       &sa, &sr, &pk) != RS_OK) {
+                    if (rs_coreg_shift_ex(pref, pcur, win_az, win_rg,
+                                          params->upsample_az, params->upsample_rg,
+                                          refine, &sa, &sr, &pk) != RS_OK) {
                         continue;
                     }
 

@@ -762,7 +762,19 @@ void rs_tomo_write_metadata(const rs_tomo_t *t, void *stream)
 
     fprintf(f, "model                 %s\n",
             (mi >= 0 && mi < n_model) ? model_name[mi] : "unknown");
-    fprintf(f, "measurement_chain     %s\n",
+
+    /* Which arithmetic produced the measurement, printed high in the sidecar and
+     * tagged so it reads at a glance.
+     *
+     * The two modes can report different tracked shifts, so two cubes of the same
+     * scene may differ for this reason and no other. A reader who does not know
+     * which is which will reach for a physical explanation of the difference. */
+    fprintf(f, "arithmetic_mode       %s\n",
+            t->params.no_optimize
+              ? "[UNOPTIMIZED] exhaustive correlation peak search, serial execution"
+              : "optimised (local peak refinement, threaded)");
+    fprintf(f, "measurement_chain     %s%s\n",
+            t->params.no_optimize ? "[UNOPTIMIZED] " : "",
             t->params.provenance[0] ? t->params.provenance : "UNRECORDED");
     fprintf(f, "solver                %s\n",
             t->params.solver == RS_TOMO_SOLVER_LSTSQ ? "least squares" : "DFT");

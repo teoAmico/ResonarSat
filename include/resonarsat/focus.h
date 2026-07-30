@@ -140,6 +140,44 @@ resonarsat_status_t rs_focus_backproject(const rs_cphd_t *cphd,
                                          size_t pulse_count,
                                          rs_slc_t *img);
 
+/* Options that change how backprojection runs, never what it computes.
+ *
+ * 'single_thread' suppresses the OpenMP parallel region, running the grid on one
+ * thread in ascending cell order. Set by --no-optimize.
+ *
+ * READ THIS BEFORE CITING THE FLAG AS A NUMERICAL CONTROL. It does not change
+ * the result, at all, in any bit. The parallel loop is over grid CELLS and each
+ * cell accumulates into its own two local doubles over pulses in strictly
+ * ascending order; no accumulator is shared between threads, no reduction clause
+ * is used, and no partial sums are combined. So the sum for a given cell is the
+ * same sequence of additions in the same order regardless of how many threads
+ * run, and the output is bitwise identical for any thread count. tests/
+ * test_focus.c asserts exactly that, which is the honest way to support the
+ * claim -- an untested claim of determinism is worth nothing, and this project
+ * has been burned by plausible-looking output before.
+ *
+ * That makes the flag a reproducibility CHECK rather than a fix: it exists so
+ * the above can be verified on a given machine and compiler, and so a run can be
+ * profiled or debugged serially. If a future change introduces a shared
+ * accumulator, this flag becomes load-bearing and the test will catch the
+ * difference. What it is not is a remedy for rounding drift -- there is none
+ * here to remedy. */
+typedef struct {
+    int single_thread;
+} rs_focus_opts_t;
+
+/* As rs_focus_backproject(), with execution options.
+ *
+ * 'opts' may be NULL, which selects the defaults (threaded). See
+ * rs_focus_opts_t for what the options do -- and, for 'single_thread', what it
+ * pointedly does not do. */
+resonarsat_status_t rs_focus_backproject_opts(const rs_cphd_t *cphd,
+                                              const rs_grid_t *grid,
+                                              size_t pulse_start,
+                                              size_t pulse_count,
+                                              const rs_focus_opts_t *opts,
+                                              rs_slc_t *img);
+
 /* Convenience wrapper: allocate 'img' to the grid dimensions and focus the full
  * aperture into it. The caller still owns 'img' and must rs_slc_free() it. */
 resonarsat_status_t rs_focus_full(const rs_cphd_t *cphd,

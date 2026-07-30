@@ -240,6 +240,55 @@ Two further checks worth running on any peak you believe:
 - Check the reported observation ratio. If each frame spans many cycles of the
   frequency you found, the amplitude is heavily understated.
 
+### `--no-optimize` — checking the arithmetic rather than the result
+
+The null tests ask whether your *result* is real. `--no-optimize` asks a narrower
+question: whether the fast code paths gave you the same answer the obvious ones
+would. Accepted by `focus`, `mmotion`, `tomo` and `sweep`.
+
+```sh
+resonarsat mmotion --cphd data/scene.cphd --offset 1700,-1700 \
+    --size 256 --cell 2.0 --n 512 --win 32 --no-optimize
+```
+
+It changes two things, worth very different amounts:
+
+- **The correlation peak search becomes exhaustive.** Instead of upsampling the
+  neighbourhood of the strongest integer sample, the whole cross-correlation
+  surface is zero-padded to the full 1/upsample lattice and searched for a global
+  maximum. **This can change a reported shift.** It is the reason the flag exists.
+- **Backprojection and the window loop become serial, and change nothing at all.**
+  The focused samples are *bitwise identical* — the parallel loop is over grid
+  cells and each cell accumulates privately over pulses in chronological order,
+  sharing no accumulator, so there is no threading drift to remove.
+  `tests/test_focus.c` asserts this to the bit. Treat this half as a
+  reproducibility check, not a correction.
+
+**Cost is affordable — single digits, not orders of magnitude.** Measured: the
+exhaustive correlator is 1.7–3.2x the optimised one per call (2.5x at the default
+32×32 window and 10×20 upsampling), and losing the threads costs about 4x more on
+eight cores. You can run this on a full-scale scene; you do not need to crop.
+
+**What to expect from the comparison.** On the synthetic two-target fixture, 10 of
+108 tracked samples differ — all of them in windows of tracking quality 0.39–0.61,
+with every window above that agreeing on every look. That is the right shape. The
+fast path's integer peak is *already* a global maximum over the sampled surface,
+so a global search can only beat it where the surface has competing lobes of
+comparable height, which is what a window with no target looks like. **Where
+neither answer is a measurement, the difference between them is not a
+correction** — do not read a `--no-optimize` shift as the more accurate one.
+
+**One trap before you count differences.** The correlation surface is periodic in
+the patch size and the two modes fold at slightly different points, so a genuine
+agreement can appear as a difference of exactly one patch width — on a 24-pixel
+patch, +12.5 and −11.5 are the same place. Fold onto the period first, or your
+worst "disagreement" will be an artefact of the wrap.
+
+Products record which mode made them: the `.meta` sidecar carries an
+`arithmetic_mode` line and the `.hdr` axis description an `[UNOPTIMIZED]` tag, so
+two cubes that differ for this reason cannot be mistaken for two cubes that differ
+because the ground did.
+
 ---
 
 ## Step 6 — depth
@@ -474,7 +523,15 @@ would produce an empty result. Use `--y los` with the phase estimator.
 
 **"--patent-exact requires ..."** — patent-chain mode is intentionally strict.
 Remove the incompatible option, or drop `--patent-exact` if you want the
-conditioned processing path.
+conditioned processing path. `--no-optimize` is *not* incompatible with it: it
+changes how the correlation peak is found, not which model, observable, solver or
+wavelength convention is used, so the sidecar still certifies the chain.
+
+**"exhaustive search over ... needs a ... surface, above the ... ceiling"** —
+`--no-optimize` builds a surface of `win × upsample` on each axis, and your window
+or `--upsample` makes it too large. Lower either. The check fires before anything
+is allocated and before tracking starts, deliberately: raised per window instead,
+it would return a complete result with every window zero and nothing saying why.
 
 **Need full patent Figure 0.5 output** — add `--geocode FILE.csv` to the
 `--patent-exact` command. Without it, the run still applies the interpreted

@@ -23,6 +23,11 @@ void rs_subap_params_default(rs_subap_params_t *params)
     params->window = 1;
     params->b_shift_hz = 0.0;   /* 0: derive from the sweep step */
     params->pair = 0;
+    /* Threaded by default. Assigned explicitly because this function does not
+     * memset the struct and its callers do not zero it -- see the note in
+     * rs_microm_params_default(), where omitting the equivalent line produced a
+     * tracker that silently changed method between runs. */
+    params->single_thread = 0;
 }
 
 /* Gather one range column of an image into a contiguous buffer, so the azimuth
@@ -542,7 +547,8 @@ resonarsat_status_t rs_subaperture_from_cphd(const struct rs_cphd *cphd_in,
         resonarsat_status_t st = rs_slc_alloc(&stack->look[i], grid->n_x, grid->n_y);
         if (st != RS_OK) { rs_subap_stack_free(stack); return st; }
 
-        st = rs_focus_backproject(cphd, grid, start, per, &stack->look[i]);
+        const rs_focus_opts_t fopts = { .single_thread = params->single_thread };
+        st = rs_focus_backproject_opts(cphd, grid, start, per, &fopts, &stack->look[i]);
         if (st != RS_OK) { rs_subap_stack_free(stack); return st; }
 
         stack->centre_time[i] = cphd->t[start + per / 2];
