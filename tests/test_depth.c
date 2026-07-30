@@ -86,6 +86,110 @@ static resonarsat_status_t make_depth_scene(rs_microm_t *m, size_t n_win, size_t
     return RS_OK;
 }
 
+/* One look's contribution, for a signal whose SHAPE departs from the steering
+ * assumption.
+ *
+ * 'i' is the look index and 'n' the look count, so a shape can vary along the
+ * aperture -- which is what damping, chirp and quadratic phase all do. */
+typedef double complex (*rs_shape_fn)(size_t i, size_t n, double kz, double z);
+
+/* Build a micro-motion result from an arbitrary per-look signal shape.
+ *
+ * make_depth_scene() injects exactly the tone the matched filter is built to
+ * recover, which tests conditioning and signal-to-noise but not robustness. This
+ * injects whatever 'shape' returns, so the inversion can be asked what it does
+ * with a signal the model does not describe. Same conventions otherwise. */
+static resonarsat_status_t make_shaped_scene(rs_microm_t *m, size_t n_win,
+                                             size_t n_looks,
+                                             const rs_tomo_params_t *p,
+                                             double z, rs_shape_fn shape,
+                                             double noise)
+{
+    /* xorshift rather than rand(), so a fixture is identical on every
+     * platform and a failure is reproducible from the source alone. */
+    unsigned rs_ = 20260730u;
+    memset(m, 0, sizeof *m);
+    m->disp_az  = calloc(n_win * n_looks, sizeof *m->disp_az);
+    m->disp_rg  = calloc(n_win * n_looks, sizeof *m->disp_rg);
+    m->vel_los  = calloc(n_win * n_looks, sizeof *m->vel_los);
+    m->disp_los = calloc(n_win * n_looks, sizeof *m->disp_los);
+    m->phase    = calloc(n_win * n_looks, sizeof *m->phase);
+    m->quality  = calloc(n_win, sizeof *m->quality);
+    if (!m->disp_az || !m->disp_rg || !m->vel_los || !m->disp_los ||
+        !m->phase || !m->quality) {
+        rs_microm_free(m);
+        return RS_ERR_ALLOC;
+    }
+
+    m->n_win = n_win;
+    m->n_win_az = n_win;
+    m->n_win_rg = 1;
+    m->n_looks = n_looks;
+    m->dt = 0.1;
+    m->f_max = 5.0;
+    m->az_spacing_m = 1.0;
+    m->rg_spacing_m = 1.0;
+
+    const double lambda_ac = rs_acoustic_wavelength(p->velocity, p->frequency,
+                                                    p->convention);
+    for (size_t w = 0; w < n_win; w++) {
+        m->quality[w] = 0.9;
+        for (size_t i = 0; i < n_looks; i++) {
+            const double b_perp = p->aperture * ((double)i / (double)n_looks);
+            const double kz = rs_tomo_wavenumber(b_perp, lambda_ac,
+                                                 p->slant_range, p->incidence);
+            double complex v = shape(i, n_looks, kz, z);
+            if (noise > 0.0) {
+                /* Two uniform draws summed to a rough normal, scaled to the
+                 * requested amplitude. Added to both components, because a
+                 * tracker's noise is on the shift it reports, not on a
+                 * hypothetical analytic signal behind it. */
+                double d[2];
+                for (int k = 0; k < 2; k++) {
+                    double s = 0.0;
+                    for (int j = 0; j < 4; j++) {
+                        rs_ ^= rs_ << 13; rs_ ^= rs_ >> 17; rs_ ^= rs_ << 5;
+                        s += (double)(rs_ % 2000) / 1000.0 - 1.0;
+                    }
+                    d[k] = noise * s * 0.5;
+                }
+                v += d[0] + I * d[1];
+            }
+            const size_t idx = w * n_looks + i;
+            m->disp_az[idx] = creal(v);
+            m->disp_rg[idx] = cimag(v);
+        }
+    }
+    return RS_OK;
+}
+
+/* The matched tone the steering matrix is built from: the positive control. */
+static double complex shape_matched(size_t i, size_t n, double kz, double z)
+{ (void)i; (void)n; return cexp(I * kz * z); }
+
+/* A resonance losing amplitude along the aperture, moderately. */
+static double complex shape_damped(size_t i, size_t n, double kz, double z)
+{ return cexp(I * kz * z) * exp(-1.5 * (double)i / (double)n); }
+
+/* The same, losing most of its amplitude within the aperture. */
+static double complex shape_damped_heavy(size_t i, size_t n, double kz, double z)
+{ return cexp(I * kz * z) * exp(-4.0 * (double)i / (double)n); }
+
+/* A dispersive return whose apparent depth drifts along the aperture. */
+static double complex shape_chirped(size_t i, size_t n, double kz, double z)
+{ return cexp(I * kz * z * (1.0 + 0.6 * (double)i / (double)n)); }
+
+/* A quadratic phase error across the aperture, as a defocus would give. */
+static double complex shape_quadratic(size_t i, size_t n, double kz, double z)
+{
+    const double u = (double)i / (double)n;
+    return cexp(I * (kz * z + 4.0 * u * u));
+}
+
+/* A feature too shallow for the geometry to resolve. */
+static double complex shape_subres(size_t i, size_t n, double kz, double z)
+{ (void)i; (void)n; return cexp(I * kz * z * 0.15); }
+
 /* Mean profile across windows, and the depth of its strongest cell above the
  * zero bin, refined parabolically. */
 static double peak_depth(const rs_tomo_t *t)
@@ -345,6 +449,128 @@ int main(void)
         RS_CHECK(sr < dT);
         /* And a folded one does not, by a wide margin. */
         RS_CHECK(sf > 4.0 * sr);
+    }
+
+    /* ------------------------------------------------------------------
+     * SIGNATURE MODEL MISMATCH.
+     *
+     * Every positive control elsewhere in this file injects exp(j*Kz*z) --
+     * exactly the tone the matched filter is built from. That tests
+     * conditioning and noise, and says nothing about what happens when the
+     * ground returns a signal of a different SHAPE. These six do.
+     *
+     * Two are documented blind spots and are asserted to FAIL, so that a later
+     * change which fixes either one is noticed rather than absorbed silently.
+     * From github.com/Hassanforeman/subsurface-sar-tomo's steering stress
+     * tests; the depths and verdicts below are this project's own measurements.
+     * ------------------------------------------------------------------ */
+    RS_CASE("signals whose shape departs from the steering model");
+    {
+        const size_t nl = 64;
+        rs_tomo_params_t q = p;
+        q.depth_max = rs_tomo_max_depth(&p, nl);
+        const double z = 0.4 * q.depth_max;
+
+        const struct { const char *name; rs_shape_fn fn; } cases[] = {
+            { "1. matched tone (positive control)", shape_matched      },
+            { "2. moderately damped resonance",     shape_damped       },
+            { "3. chirped / dispersive",            shape_chirped      },
+            { "4. quadratic phase",                 shape_quadratic    },
+            { "5. HEAVY sub-cycle damping",         shape_damped_heavy },
+            { "6. very shallow / sub-resolution",   shape_subres       },
+        };
+        const size_t n_cases = sizeof cases / sizeof cases[0];
+        double got[6];
+
+        printf("    true depth %.2f m, %zu looks, resolution %.3f m\n", z, nl, dT);
+        for (size_t i = 0; i < n_cases; i++) {
+            rs_microm_t m;
+            RS_CHECK_OK(make_shaped_scene(&m, 4, nl, &q, z, cases[i].fn, 0.0));
+            rs_tomo_t t;
+            RS_CHECK_OK(rs_tomo_focus(&m, NULL, &q, NULL, &t));
+
+            double real_c = 0.0, nm = 0.0;
+            RS_CHECK_OK(rs_tomo_alignment_null(&t, 100, 3u, &real_c, &nm,
+                                               NULL, NULL, NULL));
+            got[i] = peak_depth(&t);
+            printf("    %-36s z_rec %6.2f m  (err %6.2f)  contrast %7.1f / %.1f\n",
+                   cases[i].name, got[i], got[i] - z, real_c, nm);
+
+            rs_tomo_free(&t);
+            rs_microm_free(&m);
+        }
+
+        /* Recovered. Amplitude taper along the aperture -- cases 2 and 5 -- and
+         * a quadratic phase error -- case 4 -- all leave the tone's frequency
+         * intact, and frequency is what the matched filter reads. */
+        RS_CHECK_NEAR(got[0], z, dT);
+        RS_CHECK_NEAR(got[1], z, 2.0 * dT);
+        RS_CHECK_NEAR(got[3], z, 2.0 * dT);
+        RS_CHECK_NEAR(got[4], z, 2.0 * dT);
+
+        /* BLIND SPOT: a chirped return has no single tone, and the inversion
+         * reports a confident depth roughly 60% too deep rather than declining.
+         * Asserted to miss, so that a change which fixes it is noticed. */
+        RS_CHECK(fabs(got[2] - z) > 2.0 * dT);
+
+        /* BLIND SPOT, and the worse of the two because its contrast is the
+         * HIGHEST of all six: a sub-resolution feature is dragged to the
+         * surface and reported with more confidence than the correct answer. */
+        RS_CHECK(got[5] < 0.25 * z);
+    }
+
+    /* One case disagreed with the source, and the disagreement is informative
+     * rather than a discrepancy to reconcile away. */
+    RS_CASE("heavy damping does NOT reproduce as a blind spot here");
+    {
+        /* Case 5 recovers the depth correctly, where the source reports it
+         * MISSED. Two explanations were proposed and both were measured and
+         * rejected, which is why this case exists rather than a footnote.
+         *
+         * NOT the look count. The source uses 11 looks against 64 here, but 12
+         * looks recovers it too, to 0.06 m.
+         *
+         * NOT the noise floor. exp(-4 i/n) leaves the last looks at 0.018 of
+         * the first and the source adds noise of 0.02, so its damped tail is
+         * plausibly buried -- but the sweep below recovers the depth at every
+         * level up to 0.2, ten times the source's.
+         *
+         * The remaining structural difference is how the analytic signal is
+         * formed. This fixture synthesises it directly, putting exp(j*Kz*z)
+         * into the two shift components the tracker would have reported. The
+         * source injects a real cosine and recovers the analytic signal by
+         * Hilbert transform, and that step assumes an envelope varying slowly
+         * against the carrier -- which is exactly what heavy damping violates.
+         * If that is the cause, the blind spot belongs to the signal
+         * construction rather than to the matched filter, and this project does
+         * not inherit it. Stated as the surviving hypothesis, not as a result:
+         * it has not been tested here, and testing it means building the
+         * Hilbert path this code does not have. */
+        const size_t nl = 64;
+        rs_tomo_params_t q = p;
+        q.depth_max = rs_tomo_max_depth(&p, nl);
+        const double z = 0.4 * q.depth_max;
+        const double levels[] = { 0.0, 0.002, 0.02, 0.2 };
+
+        for (size_t i = 0; i < sizeof levels / sizeof levels[0]; i++) {
+            rs_microm_t m;
+            RS_CHECK_OK(make_shaped_scene(&m, 4, nl, &q, z,
+                                          shape_damped_heavy, levels[i]));
+            rs_tomo_t t;
+            RS_CHECK_OK(rs_tomo_focus(&m, NULL, &q, NULL, &t));
+            const double got = peak_depth(&t);
+            printf("    noise %.3f (tail is %.3f): true %.2f m -> %.2f m, err %+.2f\n",
+                   levels[i], exp(-4.0), z, got, got - z);
+            RS_CHECK(isfinite(got));
+            rs_tomo_free(&t);
+            rs_microm_free(&m);
+        }
+
+        /* No threshold is asserted. Where the crossover falls depends on the
+         * damping constant, the look count and the noise together, and pinning
+         * one triple of numbers as the boundary would encode an arbitrary
+         * choice as a requirement. The sweep is printed so a change is visible
+         * in the ctest log. */
     }
 
     RS_CASE("grid extent does NOT separate them -- kept as a negative result");
