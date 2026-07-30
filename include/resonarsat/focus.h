@@ -120,10 +120,28 @@ void rs_cphd_free(rs_cphd_t *cphd);
  * this method needs -- and because it accepts an arbitrary pulse subset without
  * any change of formulation.
  *
- * Range interpolation is linear between bins. That is adequate when the range
- * signal is oversampled, which the simulator guarantees and real range
- * compression normally provides; sinc interpolation would be the upgrade if
- * sidelobe levels ever matter more than they do here.
+ * Range interpolation is linear between bins by default; rs_focus_opts_t's
+ * range_taps selects a windowed sinc, and carries the measurement and the
+ * reference implementations that motivated it.
+ *
+ * CHECKED AGAINST A PEER. The PERFECT Suite's SAR backprojection kernel (PNNL
+ * and Georgia Tech, suite/sar/kernels/ser/bp/src/sar_backprojection.c) is the
+ * same algorithm in the same language, and the comparison came out favourably
+ * on the two things easiest to get wrong and hardest to notice:
+ *
+ *   PHASE CONVENTION. It applies exp(+j*2*ku*R) with ku = 2*pi*fc/c, which is
+ *   exp(+j*4*pi*R/lambda). This file's k_phase is 4*pi/lambda and the sign is
+ *   the same. A wrong sign defocuses and a wrong factor of two halves the
+ *   resolution, so agreeing here is worth stating.
+ *
+ *   ACCUMULATOR PRECISION, where this implementation is the better of the two.
+ *   PERFECT accumulates into a float complex and interpolates with a float
+ *   weight; this accumulates into two doubles. Over the 335,141 pulses of the
+ *   Giza collect -- 327 times their largest configuration -- that is not a
+ *   cosmetic difference.
+ *
+ * Their per-pixel loop, exact range from platform position, fractional bin
+ * index, bounds test and private accumulation all match this one.
  *
  * Cost is O(n_grid_cells * pulse_count) and dominates the pipeline's profile.
  * A 2048-squared grid over 20000 pulses is of order 1e11 interpolations, so
@@ -178,18 +196,39 @@ typedef struct {
      * aperture, so it is coherent, and coherent range error shows up as
      * structure in cross-range.
      *
-     * NGA's reference backprojector avoids this by zero-padding the range
-     * profile eightfold before interpolating, with the comment that linear
-     * interpolation "causes cross-range artifacts unless we sinc interpolate
-     * first" (MATLAB_SAR, Processing/IFP/BP/bpBasic.m). Zero-padding is not
-     * available here at that factor -- eight times an eleven-gigabyte load is
-     * not a trade this pipeline can make -- so the same correction is applied in
-     * the kernel instead, at the cost of arithmetic in the hot loop rather than
-     * memory.
+     * TWO INDEPENDENT REFERENCE IMPLEMENTATIONS UPSAMPLE BY EXACTLY EIGHT
+     * BEFORE INTERPOLATING, which is worth more than either one alone:
      *
-     * Left off by default until measured on real data, so that the change is a
-     * decision with a number behind it rather than a deference to another
-     * implementation. tests/test_focus.c carries the measurement. */
+     *   NGA's MATLAB_SAR (Processing/IFP/BP/bpBasic.m) sets its FFT length to
+     *   2^(3+nextpow2(N)) with the comment that the linear interpolation which
+     *   follows "causes cross-range artifacts unless we sinc interpolate first
+     *   with a much larger FFT size than necessary. Thus the '3+'."
+     *
+     *   The PERFECT Suite (PNNL and Georgia Tech, DARPA PERFECT programme;
+     *   suite/sar/kernels/ser/bp) defines RANGE_UPSAMPLE_FACTOR 8, indexes the
+     *   upsampled grid, and its driver prints the native and upsampled bin
+     *   resolutions side by side. Its inner loop is otherwise this one.
+     *
+     * So the correction is standard practice rather than one group's taste, and
+     * the 2-tap default here is a deliberate deviation from it. Zero-padding is
+     * what neither of them had to think twice about and what this pipeline
+     * cannot do: eight times an eleven-gigabyte load is not a trade available
+     * here, so the same correction goes into the kernel instead, costing
+     * arithmetic in the hot loop rather than memory.
+     *
+     * MEASURED before deciding, on the Giza collect, and the numbers are in
+     * tests/test_focus.c: about 1.4 dB of amplitude, uniformly, with image
+     * contrast unchanged to four significant figures and sub-look coherence
+     * unchanged. So it is a gain rather than the artefact cleanup the warnings
+     * describe, and it changes no conclusion this project draws -- which report
+     * frequencies, with amplitudes already labelled qualitative.
+     *
+     * It stays off by default for that reason and one more: every result in
+     * runs/ was produced with the 2-tap path, and flipping the default would
+     * make new runs bitwise incomparable with the recorded ones. With the
+     * coefficient table the cost is now about 10-25% rather than the 3-4x it
+     * was, so that reasoning is worth revisiting deliberately rather than by
+     * drift. */
     int range_taps;
 } rs_focus_opts_t;
 
