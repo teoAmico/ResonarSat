@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Create a run directory and seed its RUN.md. See images/README.md.
+# Create a run directory and seed its RUN.md. See runs/README.md.
 #
 # Exists so that recording provenance is easier than not recording it. The
 # alternative -- remembering to write it afterwards -- is what produced cubes
@@ -10,7 +10,7 @@
 set -e
 [ $# -ge 2 ] || { echo "usage: $0 <scene> <suffix> [question]" >&2; exit 1; }
 scene=$1; suffix=$2; question=${3:-"(not stated)"}
-dir="images/$scene/$(date +%Y-%m-%d)-$suffix"
+dir="runs/$scene/$(date +%Y-%m-%d)-$suffix"
 mkdir -p "$dir"
 {
   echo "# Run: $(date +%Y-%m-%d) $scene / $suffix"

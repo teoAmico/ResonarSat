@@ -1,10 +1,12 @@
-# Output products
+# Run outputs
 
-One directory per scene, and **one directory per run inside it**. Nothing is
-written to a scene directory directly.
+Everything this software produces from a real collect lands here: rasters, depth
+cubes and their sidecars, geocoded CSVs, and the manifest that says what produced
+them. One directory per scene, and **one directory per run inside it**. Nothing
+is written to a scene directory directly.
 
 ```
-images/
+runs/
   README.md
   giza/
     YYYY-MM-DD-khufu-paper-phase/

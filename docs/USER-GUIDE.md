@@ -446,7 +446,7 @@ literature, `viridis` is the choice when someone will measure from the image,
 tools/new-run.sh myscene paper-phase "does anything appear below the west wall?"
 ```
 
-Creates `images/myscene/<date>-paper-phase/` with a manifest to fill in. Write
+Creates `runs/myscene/<date>-paper-phase/` with a manifest to fill in. Write
 outputs there and paste the commands into it. Sidecars record the processing
 chain automatically, but only the manifest records why you ran it.
 

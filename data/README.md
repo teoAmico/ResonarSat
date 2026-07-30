@@ -102,7 +102,7 @@ but that has not been measured.
 **Khafre was the trap.** At `Y = -88` it sits almost on the mirror axis, so it
 barely moved and appeared to confirm every wrong hypothesis in turn, including
 two attempts to blame the image-plane axes -- which were correct throughout.
-The lesson is in `images/README.md` terms: a target on a symmetry axis cannot
+The lesson is in `runs/README.md` terms: a target on a symmetry axis cannot
 discriminate, and should never be used as the check.
 
 | target | lat, lon | projected `--offset`, as declared |

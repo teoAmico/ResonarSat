@@ -186,7 +186,7 @@ metadata and should stay that way.
 **Every real-data run gets a directory and a `RUN.md`.** Use `tools/new-run.sh <scene> <suffix>
 "<question>"`, which seeds the manifest — including the question the run is meant to answer, recorded
 *before* the result. A run that produced a null result keeps its directory: "deleting the runs that did
-not work is how a body of evidence quietly becomes a highlight reel" (`images/README.md`).
+not work is how a body of evidence quietly becomes a highlight reel" (`runs/README.md`).
 
 **`docs/` is a working area and mostly gitignored.** Only an allowlist is tracked (`.gitignore`).
 Development notes, review transcripts and plans stay local. The source papers and the patent are

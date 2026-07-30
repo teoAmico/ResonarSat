@@ -40,8 +40,8 @@ resonarsat mmotion --cphd data/giza.cphd --rbins 4096 \
     --at 29.979175,31.134186 --size 256 --cell 2.0 \
     --subap paper --reference pair --estimator correlation \
     --n 128 --win 32 --coherence 0 --no-detrend --upsample 40 \
-    --shifts images/giza/2026-07-29-patent-exact-true-khufu/khufu_n128.csv \
-    --out images/giza/2026-07-29-patent-exact-true-khufu/khufu_n128
+    --shifts runs/giza/2026-07-29-patent-exact-true-khufu/khufu_n128.csv \
+    --out runs/giza/2026-07-29-patent-exact-true-khufu/khufu_n128
 ```
 
 `--rbins 4096` gives +/-512 m of slant range, enough for Khufu's 552 m
