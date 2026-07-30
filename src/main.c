@@ -2,6 +2,7 @@
 
 #include "resonarsat/focus.h"
 #include "resonarsat/geom.h"
+#include "resonarsat/ccd.h"
 #include "resonarsat/microm.h"
 #include "resonarsat/raster.h"
 #include "resonarsat/simulate.h"
@@ -1161,7 +1162,21 @@ static int rs_cmd_mmotion(int argc, char **argv)
                "                          [--upsample N]\n"
                "                          [--size N] [--cell M] [--win N]\n"
                "                          [--coherence F] [--out PREFIX]\n"
+               "                          [--ccd-out PREFIX] [--ccd-win N]\n"
+               "                          [--ccd-loading F]\n"
                "                          [--no-optimize]\n"
+               "\n"
+               "--ccd-out runs the scale-invariant change-detection LOCATOR over\n"
+               "the same sub-aperture stack and writes a map. It answers 'where in\n"
+               "this scene is something moving', not 'at what frequency' -- a\n"
+               "different question from everything else this command does, and one\n"
+               "that does not need the tracker to succeed. The statistic's\n"
+               "no-change value is 1.0; a bright but STATIONARY target scores near\n"
+               "1.0 too, which is the point of it. It has no detection threshold:\n"
+               "compare a map against one from a motionless scene before reading\n"
+               "structure into it. --ccd-win sets the sliding window (default 5)\n"
+               "and --ccd-loading the noise floor as a fraction of mean scene\n"
+               "power (default 1e-3; zero shows the unregularised behaviour).\n"
                "\n"
                "--no-optimize is an audit baseline, not a better measurement. It\n"
                "searches the WHOLE upsampled correlation surface for the peak instead\n"
@@ -1288,6 +1303,69 @@ static int rs_cmd_mmotion(int argc, char **argv)
     printf("sub-apertures: %zu looks, dt %.4f s\n", stack.n_looks, stack.dt);
     printf("  observable band  f_max %.2f Hz   AT sub-look resolution %.2f m\n",
            stack.f_max, stack.az_resolution);
+
+    /* The change-detection locator, run here rather than beside the other
+     * outputs at the end of this function.
+     *
+     * Placement is deliberate. It needs only the sub-aperture stack, and every
+     * Giza run so far has exited at the spectrum stage with RS_ERR_RANGE --
+     * honestly, because no window resolved motion -- which is upstream of the
+     * --out block. A locator written down there would never run on precisely
+     * the scenes it exists to say something about. See rs_ccd_t. */
+    {
+        const char *ccd_out = rs_opt(argc, argv, "--ccd-out");
+        if (ccd_out) {
+            rs_ccd_params_t cp;
+            rs_ccd_params_default(&cp);
+            const double cw = rs_opt_double(argc, argv, "--ccd-win", 0.0);
+            if (cw > 0.0) cp.win = (size_t)cw;
+            const double cl = rs_opt_double(argc, argv, "--ccd-loading", -1.0);
+            if (cl >= 0.0) cp.loading = cl;
+
+            rs_ccd_t ccd;
+            if (rs_ccd_locate(&stack, &cp, &ccd) != RS_OK) {
+                rs_report_error("mmotion", RS_ERR_ARG);
+            } else {
+                /* Reported rather than only written, because the map's absolute
+                 * level is the whole of its meaning: 1.0 is the no-change value,
+                 * and a map whose median sits there has found nothing however
+                 * structured its picture looks. */
+                double lo = 0.0, hi = 0.0, sum = 0.0;
+                size_t n = 0;
+                for (size_t p = 0; p < ccd.n_row * ccd.n_col; p++) {
+                    const double v = ccd.map[p];
+                    /* The border is not computed and holds zero; seeding the
+                     * extremes from it reported a minimum of 0.000 for every
+                     * scene, which reads as a pixel where the statistic
+                     * collapsed rather than one that was never evaluated. */
+                    if (v <= 0.0) continue;
+                    if (n == 0 || v < lo) lo = v;
+                    if (n == 0 || v > hi) hi = v;
+                    sum += v; n++;
+                }
+                printf("CCD locator: %zux%zu window over %zu sub-aperture triples\n",
+                       cp.win, cp.win, ccd.n_triples);
+                printf("  statistic  min %.3f  mean %.3f  max %.3f   "
+                       "(1.000 is the no-change value)\n",
+                       lo, n ? sum / (double)n : 0.0, hi);
+                printf("  A MAP IS NOT EVIDENCE WITHOUT A FLOOR. The source method\n"
+                       "  implements no detection threshold; compare against a\n"
+                       "  motionless scene through this same chain before reading\n"
+                       "  structure into it.\n");
+
+                char path[512];
+                snprintf(path, sizeof path, "%s_ccd.png", ccd_out);
+                rs_raster_write_map(ccd.map, ccd.n_row, ccd.n_col,
+                                    path, 0.0, 0.0, RS_PALETTE_VIRIDIS);
+                snprintf(path, sizeof path, "%s_ccd.f32", ccd_out);
+                rs_raster_write_cube(ccd.map, 1, ccd.n_row, ccd.n_col, path,
+                                     "axes row (grid x), col (grid y); "
+                                     "scale-invariant CCD statistic, 1 = no change");
+                printf("wrote %s_ccd.png and %s_ccd.f32\n", ccd_out, ccd_out);
+                rs_ccd_free(&ccd);
+            }
+        }
+    }
 
     mp.win_az = mp.win_rg = (size_t)rs_opt_double(argc, argv, "--win", 32);
     mp.stride_az = mp.stride_rg = mp.win_az / 2;

@@ -1,0 +1,7 @@
+format float32
+byte_order little_endian
+n_plane 1
+n_row 512
+n_col 512
+layout plane-major, then row, then column
+axes axes row (grid x), col (grid y); scale-invariant CCD statistic, 1 = no change

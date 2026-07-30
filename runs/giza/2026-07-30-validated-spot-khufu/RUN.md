@@ -380,7 +380,102 @@ looks that share 88% of their bandwidth. A method demonstrated on the former doe
 not transfer to the latter, and this run is the measurement of that gap rather
 than an argument about it.
 
-### What was not done
+## The CCD locator on the same stack
+
+Run after `rs_ccd_locate()` was implemented and wired to `mmotion` as
+`--ccd-out`, on the identical configuration, so the locator and the tracker see
+the same 159 sub-apertures:
+
+```sh
+resonarsat mmotion --cphd data/giza.cphd --rbins 4096 \
+    --at 29.979175,31.134186 --size 512 --cell 1.0 \
+    --subap uniform --overlap 0.88 --estimator correlation \
+    --n 159 --win 32 --coherence 0 --upsample 40 \
+    --ccd-out khufu
+```
+
+```
+CCD locator: 5x5 window over 157 sub-aperture triples
+  statistic  min 7.352  mean 26.608  max 3828.335   (1.000 is the no-change value)
+```
+
+### The statistic is saturated across the whole scene
+
+| | synthetic fixture | **Khufu** |
+|---|---|---|
+| minimum over the map | 1.000 | **7.352** |
+| mean | 1.359 | 26.608 |
+| median | -- | 14.43 |
+| maximum | 35.47 (the vibrating target) | 3828.3 |
+
+**No pixel anywhere on the Khufu map is near the no-change value.** The lowest
+point of the entire scene is 7.35, where the synthetic fixture's background sits
+at 1.0 and only the deliberately vibrating target rises above it.
+
+The reading is that real distributed clutter violates the detector's null
+hypothesis everywhere. `Sigma_X = gamma * Sigma_Y` says the covariance structure
+of consecutive sub-aperture pairs differs only by a scale factor; sub-look
+speckle decorrelates between looks even at 88% bandwidth overlap, and
+decorrelation is a change in structure, not in scale. So every window "changes",
+and the statistic measures how much clutter decorrelated rather than what moved.
+
+This is a property of the scene, not of the implementation -- the same code puts
+a static point target at 1.049 on the fixture -- and it is why the source paper's
+missing detection threshold matters more on rubble than on a shaker in an open
+field. It is also worth noting that the paper's statistic maps are normalised to
+their own maximum, which would render a saturated background invisible in
+exactly this way.
+
+### The extremes are stripes, not targets
+
+The top 0.1% of pixels are not scattered and not clustered on a structure. They
+lie in a **five-column band, 464-468, spanning rows 87-463** -- nearly the full
+height of the image -- with a second weaker band at columns 46-47:
+
+```
+column median, typical            14.41
+columns 464/465/466/467/468      498 / 601 / 652 / 632 / 576
+columns 463 and 469               40 and 82        (abrupt on both sides)
+```
+
+Image column is the grid's Y, so a column-aligned band is a feature at constant
+slant range spanning the whole scene. Nothing about a vibrating point target
+produces that; a processing artefact or a linear ground feature at constant
+range does. **The map's maximum is not a detection**, and reporting 3828 without
+saying where it sits would have been the single most misleading number this run
+could produce.
+
+### Khufu itself
+
+| region | median | mean |
+|---|---|---|
+| Khufu, 120 x 120 m about the grid origin | 17.53 | 18.61 |
+| wider plateau, 360 x 360 m | 15.09 | 15.98 |
+| off-target corners | 15.73 | 60.41 |
+
+The pyramid runs about **16% above** the surrounding plateau, in a map whose
+interquartile range is 11.9 to 18.0 and whose tail reaches into the thousands.
+That is inside the ordinary variation of the scene and is not a detection of
+anything. It is also the direction a slightly different backscatter statistic
+would push it, with no motion involved at all.
+
+### What this establishes, and what it needs next
+
+The locator runs on real data, on the same stack as the tracker, and produces a
+map where the tracker could not produce a measurement -- which was the point of
+implementing it, since it never tracks anything and so is not blocked by the
+correlation failure documented above.
+
+**It has not detected micro-motion at Khufu, and it cannot say it has not.** A
+map with no floor is not evidence, which the command prints for itself every
+time it runs. The floor is `--null-static` through this identical chain: the same
+geometry, the same 159 sub-apertures, the same 5x5 window, over a simulated scene
+where nothing moves. Whatever value that produces is the number 14.43 has to
+clear, and on the evidence here it will not be anywhere near 1.0.
+
+That run is the obvious next one and was not done today.
+
+### What else was not done
 
 `--null-trials` was dropped, so there is no shuffled floor here. It would have
 been valid for this observable -- correlation, not phase -- but a floor is a test

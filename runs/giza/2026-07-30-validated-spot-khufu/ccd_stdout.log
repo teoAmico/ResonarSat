@@ -1,0 +1,18 @@
+--at 29.979175,31.134186 resolves to --offset -152,-552 in this product's image plane
+sub-apertures: 159 looks, dt 0.1976 s
+  observable band  f_max 2.53 Hz   AT sub-look resolution 1.02 m
+CCD locator: 5x5 window over 157 sub-aperture triples
+  statistic  min 7.352  mean 26.608  max 3828.335   (1.000 is the no-change value)
+  A MAP IS NOT EVIDENCE WITHOUT A FLOOR. The source method
+  implements no detection threshold; compare against a
+  motionless scene through this same chain before reading
+  structure into it.
+wrote runs/giza/2026-07-30-validated-spot-khufu/khufu_ccd.png and runs/giza/2026-07-30-validated-spot-khufu/khufu_ccd.f32
+sub-pixel refinement: 1/40 px (default 1/10 azimuth, 1/20 range)
+tracked 961 windows (31 x 31); 961 pass the 0.00 coherence mask
+spectra: 80 bins, 0.0318 Hz resolution
+strongest peak in window 455: 0.064 Hz, prominence 25.4, quality 0.128, peak-to-peak velocity 278.3 mm/s
+  526 of 961 windows were eligible for selection (coherence gate and quantisation floor)
+  sub-aperture response 0.9820 (-0.2 dB) at an observation ratio of 0.10
+  (amplitude is QUALITATIVE -- relative amplitudes do not validate
+   against ground truth even where frequencies do)
