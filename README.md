@@ -64,7 +64,11 @@ paper and patent, so the technique itself can be tested.
   longest dwells, including the 32.9 s collect over Giza the reproduction attempt runs on;
   the CPHD reader takes both sample formats, Umbra's CF8 and Capella's CI4. UAVSAR SLC
   stacks serve as the reader-development starter. Sentinel-1 IW and ESA COSMO-SkyMed
-  samples are needed only later, for multi-pass validation.
+  samples are needed only later, for multi-pass validation — **Sentinel-1 IW cannot do
+  the single-pass work at all**, because TOPS beam steering leaves a target illuminated
+  for about 0.141 s against this collect's 32.87 s, putting the depth resolution at 595 m
+  rather than 2.4 m. [`docs/DATASETS.md`](docs/DATASETS.md) gives the arithmetic and the
+  reason a Sentinel-1 inversion still returns a confident, well-conditioned answer.
 - **Targets:** stable man-made structures — bridges and dams — under long-dwell spotlight
   coverage, whose dominant vibration modes project usefully onto the satellite line of
   sight. That last condition is a real constraint, not a formality, and nothing in the

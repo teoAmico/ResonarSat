@@ -227,6 +227,48 @@ Resources:
 - ASF Vertex: https://search.asf.alaska.edu
 - Copernicus Data Space: https://dataspace.copernicus.eu
 
+**IW cannot do the single-pass work, and the reason is dwell rather than
+anything fixable in processing.** It is listed here for multi-pass comparison
+only, and this section says why so that nobody spends a week rediscovering it.
+
+TOPS steers the beam through each burst, so a target is illuminated for a
+fraction of the burst. Working back from the product's own azimuth resolution --
+`dx = lambda*R/(2*v*T)` with `dx` about 22 m at C band, `R` about 850 km --
+gives an illumination time of **0.141 s** and therefore an observed aperture of
+about **1.07 km**. The Giza Capella spotlight collect gives **32.87 s** and
+**238.7 km**, a factor of 223.
+
+Depth resolution is `lambda_ac*R/(2*A)` (`rs_tomo_resolution()`), so it inherits
+that factor directly. At the same assumed constants for both -- `v = 1500 m/s`,
+`f = 500 Hz` -- and computed with this project's own code:
+
+| | illumination | aperture | **depth resolution** |
+|---|---|---|---|
+| Sentinel-1 IW | 0.141 s | 1.07 km | **594.6 m** |
+| Capella spotlight (Giza) | 32.87 s | 238.7 km | **2.37 m** |
+
+A resolution cell of 595 m cannot say anything about structures tens of metres
+across, and no choice of `v` or `f` repairs it: both scale the two columns
+identically, so the ratio is fixed by geometry. The unambiguous depth compounds
+the point -- at 16 sub-apertures Sentinel-1's is 5.5 km, so the entire depth axis
+falls inside one resolution cell and a half.
+
+**Note what is NOT the problem.** The steering matrix is equally well conditioned
+in both cases -- `rs_tomo_conditioning()` returns essentially the same condition
+number and rank for either geometry, because conditioning depends on the depth
+cell size relative to the resolution, not on the resolution itself. So a
+Sentinel-1 inversion will run, converge, and produce a confident, well-posed,
+structured profile. It will simply be resolving in units of 600 m. That is worth
+stating because a failed inversion announces itself and a well-conditioned
+meaningless one does not.
+
+An independent attempt on exactly this data
+(github.com/mfwarren/Pyramid, Sentinel-1A over Giza) reached the same conclusion
+from the other direction, reporting an EM-style vertical resolution of about
+4.6 km and acoustic-style figures of 108-215 m for its own assumed constants. Its
+code is unlicensed, so nothing here derives from it; the numbers above are this
+project's own.
+
 ### UAVSAR
 
 - Band: L-band
