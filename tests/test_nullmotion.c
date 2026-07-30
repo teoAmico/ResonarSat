@@ -31,7 +31,8 @@ static resonarsat_status_t analyse(const rs_sim_tgt_t *tg, size_t n_tgt,
                                    double *max_prom_out,
                                    double *at_freq_prom_out, double want_freq,
                                    size_t *n_above_out, double above_thresh,
-                                   size_t *n_win_out)
+                                   size_t *n_win_out,
+                                   double *peak_freq_out, double *df_out)
 {
     rs_cphd_t c;
     resonarsat_status_t st = rs_sim_scene(&c, tg, n_tgt, 20.0, 400.0, 256, 0.5);
@@ -75,10 +76,16 @@ static resonarsat_status_t analyse(const rs_sim_tgt_t *tg, size_t n_tgt,
         rs_microm_free(&m); rs_subap_stack_free(&s); rs_cphd_free(&c); return st;
     }
 
-    double max_prom = 0.0, at_freq = 0.0;
+    double max_prom = 0.0, at_freq = 0.0, peak_freq = 0.0;
     size_t n_above = 0;
     for (size_t w = 0; w < spec.n_win; w++) {
-        if (spec.prominence[w] > max_prom) max_prom = spec.prominence[w];
+        if (spec.prominence[w] > max_prom) {
+            max_prom = spec.prominence[w];
+            /* The frequency the TOOL would report: the one belonging to the
+             * most prominent window, which is what rs_spectrum_best_window()
+             * selects and what mmotion prints. */
+            peak_freq = spec.dominant_freq[w];
+        }
         if (spec.prominence[w] > above_thresh) n_above++;
         if (want_freq > 0.0 &&
             fabs(spec.dominant_freq[w] - want_freq) < 2.0 * spec.df &&
@@ -91,6 +98,8 @@ static resonarsat_status_t analyse(const rs_sim_tgt_t *tg, size_t n_tgt,
     if (at_freq_prom_out) *at_freq_prom_out = at_freq;
     if (n_above_out)      *n_above_out = n_above;
     if (n_win_out)        *n_win_out = spec.n_win;
+    if (peak_freq_out)    *peak_freq_out = peak_freq;
+    if (df_out)           *df_out = spec.df;
 
     rs_spectrum_free(&spec);
     rs_microm_free(&m);
@@ -113,7 +122,8 @@ int main(void)
             { .x =   0.0, .y = 0.0, .z = 0.0, .rcs = 1.0 },
             { .x = -30.0, .y = 0.0, .z = 0.0, .rcs = 0.8 },
         };
-        RS_CHECK_OK(analyse(stat, 2, &floor_prom, NULL, 0.0, &n_above, 8.0, &n_win));
+        RS_CHECK_OK(analyse(stat, 2, &floor_prom, NULL, 0.0, &n_above, 8.0, &n_win,
+                            NULL, NULL));
 
         printf("    highest prominence anywhere: %.1f\n", floor_prom);
         printf("    %zu of %zu windows exceed prominence 8\n", n_above, n_win);
@@ -132,35 +142,58 @@ int main(void)
         const double freqs[] = { 0.3, 0.5, 0.7, 0.9 };
         const size_t n_freq = sizeof freqs / sizeof freqs[0];
 
-        printf("    %9s %14s %10s %s\n",
-               "injected", "target prom", "floor", "clears?");
+        printf("    %9s %13s %9s %8s %12s\n",
+               "injected", "matched prom", "floor", "clears?", "TOOL reports");
 
-        size_t n_clear = 0;
+        size_t n_clear = 0, n_correct = 0;
         for (size_t i = 0; i < n_freq; i++) {
             const rs_sim_tgt_t vib[] = {
                 { .x = 0.0, .y = 0.0, .z = 0.0, .rcs = 1.0,
                   .vib_freq = freqs[i], .vib_amp = 0.020 },
             };
-            double tp = 0.0;
-            RS_CHECK_OK(analyse(vib, 1, NULL, &tp, freqs[i], NULL, 0.0, NULL));
+            double tp = 0.0, peak_f = 0.0, df = 0.0;
+            RS_CHECK_OK(analyse(vib, 1, NULL, &tp, freqs[i], NULL, 0.0, NULL,
+                                &peak_f, &df));
 
             const int clears = tp > floor_prom;
+            const int correct = fabs(peak_f - freqs[i]) < 2.0 * df;
             if (clears) n_clear++;
-            printf("    %7.1f Hz %13.1f %10.1f  %s\n",
-                   freqs[i], tp, floor_prom, clears ? "yes" : "NO");
+            if (correct) n_correct++;
+            printf("    %7.1f Hz %12.1f %9.1f %8s %8.3f Hz %s\n",
+                   freqs[i], tp, floor_prom, clears ? "yes" : "NO",
+                   peak_f, correct ? "ok" : "WRONG");
         }
 
-        printf("\n    %zu of %zu genuine detections clear the false-positive floor\n",
-               n_clear, n_freq);
-        printf("    Detections clearing the floor is what makes a measurement a\n"
-               "    measurement rather than a ranking of artefacts. This became\n"
-               "    true only at a sub-look count set by the ambiguity condition;\n"
-               "    at the settings used previously the margin was below 1.\n");
+        printf("\n    %zu of %zu clear the floor by the old criterion\n", n_clear, n_freq);
+        printf("    %zu of %zu are the frequency the TOOL would report\n",
+               n_correct, n_freq);
 
-        /* Now assertable, where before it was not: at this operating point
-         * genuine detections do clear the floor. The bar is set below the
-         * measured rate so that an improvement passes and a regression fails. */
+        /* TWO CRITERIA, AND ONLY THE SECOND IS ABOUT THE MEASUREMENT.
+         *
+         * The first asks whether SOME window reports approximately the injected
+         * frequency with more prominence than a static scene manages anywhere.
+         * That is weaker than it reads. A two-bin tolerance out of this
+         * spectrum's bins is a few percent per window, and the chance that at
+         * least one window of many lands inside it is not small: at the 9
+         * windows here it is 0.44, and on the 361-window grids this project
+         * runs over real data it is 1.000 to six decimal places. A criterion
+         * that a static scene satisfies by chance cannot establish a detection
+         * on its own; see runs/giza/2026-07-30-validated-spot-khufu/
+         * POSITIVE-CONTROL.md, where seven configurations all "recovered" a
+         * target under it, including ones that missed at every window actually
+         * containing the target.
+         *
+         * The second asks what mmotion would PRINT: the dominant frequency of
+         * the most prominent window, which is what rs_spectrum_best_window()
+         * selects and what a user reads off. That number cannot be produced by
+         * a lucky window elsewhere in the scene, because it is a single value
+         * per run rather than a search over candidates.
+         *
+         * Both are asserted. The first is kept because it is the historical
+         * measure and a regression in it still matters; the second is the one
+         * that means the chain recovered the vibration. */
         RS_CHECK(n_clear >= 3);
+        RS_CHECK(n_correct >= 3);
     }
 
     RS_TEST_END();

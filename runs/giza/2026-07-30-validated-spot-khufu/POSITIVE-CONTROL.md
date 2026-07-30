@@ -94,11 +94,39 @@ rather than vacuous, and partly rescued by the comparison against a static
 floor -- but the criterion does not become sound at any window count, it only
 becomes less obviously unsound.
 
-**Consequence.** Every "4 of 4 genuine detections clear the false-positive floor"
-this project has recorded rests on that criterion. It is not evidence that the
-chain recovers a correct frequency. Nothing in this repository currently
-demonstrates that it does, on synthetic data or real.
+**Consequence, and the fix, which did not go the way this section predicted.**
 
-Fixing the test means requiring the recovering window to be one that contains
-the injected target. That is a small change and it is likely to turn a passing
-test red, which is the point of making it.
+Restricting the search to windows containing the target -- the fix proposed here
+first -- turns out not to bite on this test's geometry: its grid is 64 cells and
+its windows are 32 wide at stride 16, so all nine of them contain the centre
+target. The criterion's weakness is not where the search looks but what it
+searches FOR. It asks whether SOME window reports approximately the right
+frequency, which is a question about a set of candidates.
+
+The criterion that cannot be satisfied by a lucky window is what the tool would
+PRINT: the dominant frequency of the most prominent window, one value per run,
+selected by rs_spectrum_best_window(). That is now asserted alongside the old
+measure, and **it passes**:
+
+```
+   injected  matched prom     floor  clears? TOOL reports
+      0.3 Hz         24.4      16.4      yes    0.302 Hz ok
+      0.5 Hz         32.0      16.4      yes    0.504 Hz ok
+      0.7 Hz         30.6      16.4      yes    0.706 Hz ok
+      0.9 Hz         17.9      16.4      yes    0.907 Hz ok
+```
+
+So the sentence this section originally carried -- that nothing in the
+repository demonstrates the chain recovers a correct frequency -- was wrong, and
+is retracted. It does, at 128 looks, zero overlap, the pulse route, a 20 mm
+target on a 64-cell grid. Four frequencies, four correct answers, each within
+half a bin.
+
+What remains true is that the demonstration does not extend to the operating
+point this run used. The gap between the two is now the whole question, and the
+most conspicuous difference is how much of the correlation window the target's
+response fills: at 128 looks the sub-look resolution is 8.26 m against a 0.5 m
+cell, so the target spans about sixteen cells of a thirty-two cell window; at
+159 looks with 0.88 overlap it is 1.27 m against 0.4 m, about three cells of
+thirty-two. That is the next thing to vary, and it is not one of the four
+candidates this bisection set out to test.
