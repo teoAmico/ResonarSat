@@ -2,7 +2,7 @@
   <img src="assets/logo.png" alt="ResonarSat" width="420">
 </p>
 
-# ResonarSat
+# ResonarSat Project
 
 SAR Doppler tomography and micro-motion analysis for solid structures — implemented in C.
 
@@ -98,11 +98,15 @@ See [`runs/giza/2026-07-30-uniform-phase-khufu/`](runs/giza/2026-07-30-uniform-p
 
 **Two different limits are easy to confuse.** The step between sub-apertures sets how finely
 in time the ground is sampled, and so the highest frequency representable at all; each
-sub-aperture's own length sets how strongly a frequency survives, since one spanning several
-cycles averages much of the motion away. Overlapping separates the two, which is why the
-validated work uses thousands of sub-apertures at 90–99% overlap rather than a few dozen. The
-residual cost is amplitude, not resolution, and the tool reports that attenuation with every
-measurement.
+sub-aperture's own length sets how strongly a frequency survives. Overlapping separates the
+two. But the sub-aperture length has an upper bound as well, and it is the one that bites:
+past an observation ratio of about 0.5 the sub-look *resolves* the target's own micro-Doppler
+paired echoes, the tracked feature fragments and correlation tracking fails at any amplitude.
+Since the observation ratio is `f · α · dwell`, **a long dwell is a liability here, not an
+asset** — on the 32.9 s Giza collect, at the aperture fraction the published validation uses,
+nothing above about 0.12 Hz is reachable. `resonarsat validate` computes this for a given
+collect and target before anything is processed.
+
 
 Three limits worth knowing before choosing a target:
 

@@ -3,6 +3,7 @@
 #include "resonarsat/focus.h"
 #include "resonarsat/geom.h"
 #include "resonarsat/ccd.h"
+#include "resonarsat/validate.h"
 #include "resonarsat/microm.h"
 #include "resonarsat/raster.h"
 #include "resonarsat/simulate.h"
@@ -24,6 +25,7 @@ static void rs_usage(void)
 "\n"
 "  feasibility   compute the observable vibration band and what it costs\n"
 "  info          print a product's geometry and timing\n"
+"  validate      can this collect support the measurement you want?\n"
 "  focus         form an image from phase history (backprojection)\n"
 "  mmotion       track sub-looks and extract vibration spectra\n"
 "  tomo          focus vibration observations into a depth profile\n"
@@ -2912,6 +2914,139 @@ static int rs_cmd_sweep(int argc, char **argv)
     return 0;
 }
 
+
+/* Ascending comparison for qsort over doubles, for the PRI percentiles. */
+static int rs_cmp_double_asc(const void *a, const void *b)
+{
+    const double x = *(const double *)a, y = *(const double *)b;
+    return (x > y) - (x < y);
+}
+
+/* Validate a collect against a measurement, before spending hours on it.
+ *
+ * Reads the collect for its geometry AND its per-pulse timing -- the PRF
+ * stability check needs the actual pulse times, which no annotation carries --
+ * then runs the arithmetic in rs_validate(). A single range bin is retained,
+ * because nothing here reads the signal. */
+static int rs_cmd_validate(int argc, char **argv)
+{
+    const char *in = rs_opt(argc, argv, "--cphd");
+    if (!in) {
+        printf("usage: resonarsat validate --cphd FILE [--frequency HZ]\n"
+               "                           [--amplitude MM] [--alpha F]\n"
+               "                           [--overlap F] [--upsample N]\n"
+               "                           [--cell M] [--size N]\n"
+               "\n"
+               "Answers whether this collect can support the measurement you\n"
+               "intend, before any of it is processed. Every check is arithmetic\n"
+               "on the collect's geometry and costs milliseconds; the read of the\n"
+               "file is the only slow part, and it retains one range bin.\n"
+               "\n"
+               "--frequency is the vibration you are looking for and is what\n"
+               "makes most of the checks answerable. Without it only the\n"
+               "geometry and timing checks run.\n"
+               "\n"
+               "EVERY CHECK IS NECESSARY AND NONE IS SUFFICIENT. A collect that\n"
+               "passes all of them may still measure nothing, because whether the\n"
+               "ground moves is not a property of the file. The ground-truth line\n"
+               "always reports UNKNOWN and says why.\n");
+        return 1;
+    }
+
+    rs_cphd_t c;
+    /* Eight bins rather than one: the reader refuses a window too narrow
+     * to focus, and this command has no use for the samples either way. */
+    const rs_cphd_read_opts_t opts = { .rbin_window = 8 };
+    resonarsat_status_t st = rs_read_cphd(in, &opts, &c);
+    if (st != RS_OK) { rs_report_error("validate", st); return 1; }
+
+    rs_validate_req_t req;
+    rs_validate_req_default(&req);
+    req.dwell_s       = (c.n_pulse > 1) ? c.t[c.n_pulse - 1] - c.t[0] : 0.0;
+    req.prf_hz        = c.prf;
+    req.lambda_m      = c.lambda;
+    req.n_pulse       = c.n_pulse;
+    /* The read above retains a narrow window, so the collect's own range-bin
+     * count is not in 'c'. Report the memory a real read would cost at the
+     * --rbins the caller intends to use. */
+    req.n_rbin        = (size_t)rs_opt_double(argc, argv, "--rbins", 4096.0);
+
+    /* Slant range, platform speed and incidence measured from the recorded
+     * positions rather than assumed, matching what rs_focus_backproject()
+     * derives for the image it produces. */
+    if (c.n_pulse > 1) {
+        const double *p0 = &c.pos[0];
+        const double r0 = sqrt(p0[0]*p0[0] + p0[1]*p0[1] + p0[2]*p0[2]);
+        req.slant_range_m = (c.r_ref && c.r_ref[0] > 0.0) ? c.r_ref[0] : r0;
+        double d[3];
+        for (int k = 0; k < 3; k++) d[k] = c.pos[3*(c.n_pulse-1)+k] - c.pos[k];
+        req.v_platform_ms = sqrt(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]) / req.dwell_s;
+        const double h = fabs(p0[2]);
+        req.incidence_rad = (req.slant_range_m > 0.0)
+                          ? acos(fmin(1.0, h / req.slant_range_m)) : 0.0;
+    }
+
+    /* Timing, measured. The annotated PRF is one number; the real thing is not.
+     *
+     * The spread is taken from the 1st and 99th percentiles rather than the
+     * extremes, because a single dropped vector leaves one interval of nine
+     * ordinary ones and would otherwise be reported as an 89% PRF excursion.
+     * The gap is what that interval actually is, and it is reported separately
+     * as itself. */
+    if (c.n_pulse > 2) {
+        const size_t m = c.n_pulse - 1;
+        double *pri = malloc(m * sizeof *pri);
+        if (pri) {
+            double worst = 0.0;
+            for (size_t i = 0; i < m; i++) {
+                pri[i] = c.t[i+1] - c.t[i];
+                if (pri[i] > worst) worst = pri[i];
+            }
+            qsort(pri, m, sizeof *pri, rs_cmp_double_asc);
+            const double p01 = pri[m / 100], p99 = pri[(m * 99) / 100];
+            req.prf_min_hz = (p99 > 0.0) ? 1.0 / p99 : 0.0;
+            req.prf_max_hz = (p01 > 0.0) ? 1.0 / p01 : 0.0;
+            req.worst_gap_s = worst;
+            free(pri);
+        }
+    }
+
+    req.target_freq_hz = rs_opt_double(argc, argv, "--frequency", 0.0);
+    req.target_amp_m   = rs_opt_double(argc, argv, "--amplitude", 0.0) / 1000.0;
+    req.alpha    = rs_opt_double(argc, argv, "--alpha", req.alpha);
+    req.overlap  = rs_opt_double(argc, argv, "--overlap", req.overlap);
+    req.upsample = (size_t)rs_opt_double(argc, argv, "--upsample", (double)req.upsample);
+    req.cell_m   = rs_opt_double(argc, argv, "--cell", req.cell_m);
+    req.grid_n   = (size_t)rs_opt_double(argc, argv, "--size", (double)req.grid_n);
+
+    rs_validate_finding_t f[RS_VALIDATE_N_CHECKS];
+    size_t nf = 0;
+    const rs_validate_level_t worst = rs_validate(&req, f, &nf);
+
+    printf("\nvalidating %s\n", in);
+    if (req.target_freq_hz > 0.0) {
+        printf("  against a %.3f Hz target", req.target_freq_hz);
+        if (req.target_amp_m > 0.0) printf(" of %.2f mm", 1000.0 * req.target_amp_m);
+        printf(", alpha %.2f%%, overlap %.2f\n", 100.0 * req.alpha, req.overlap);
+    } else {
+        printf("  no --frequency given: geometry and timing checks only\n");
+    }
+    printf("\n");
+    for (size_t i = 0; i < nf; i++) {
+        printf("  %-7s %-22s %s\n", rs_validate_level_str(f[i].level),
+               f[i].name, f[i].detail);
+    }
+    printf("\n  VERDICT: %s\n", rs_validate_level_str(worst));
+    if (worst == RS_V_FAIL) {
+        printf("  At least one requirement is arithmetically unmet. Processing\n"
+               "  this configuration will still produce a complete-looking\n"
+               "  result; that is the failure mode this command exists for.\n");
+    }
+
+    rs_cphd_free(&c);
+    return (worst == RS_V_FAIL) ? 2 : 0;
+}
+
 /* Dispatch to a subcommand. */
 int main(int argc, char **argv)
 {
@@ -2920,6 +3055,7 @@ int main(int argc, char **argv)
     const char *cmd = argv[1];
     if (strcmp(cmd, "feasibility") == 0) return rs_cmd_feasibility(argc - 1, argv + 1);
     if (strcmp(cmd, "info") == 0)        return rs_cmd_info(argc - 1, argv + 1);
+    if (strcmp(cmd, "validate") == 0)    return rs_cmd_validate(argc - 1, argv + 1);
     if (strcmp(cmd, "focus") == 0)       return rs_cmd_focus(argc - 1, argv + 1);
     if (strcmp(cmd, "mmotion") == 0)     return rs_cmd_mmotion(argc - 1, argv + 1);
     if (strcmp(cmd, "tomo") == 0)        return rs_cmd_tomo(argc - 1, argv + 1);

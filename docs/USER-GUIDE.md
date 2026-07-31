@@ -109,6 +109,43 @@ Note the dwell and pulse count. You need them to choose sub-aperture settings.
 
 ---
 
+## Step 2½ — ask whether the measurement is possible at all
+
+```sh
+resonarsat validate --cphd data/scene.cphd --frequency 2.0 --amplitude 1.0 \
+    --alpha 0.05 --overlap 0.88 --cell 1.0 --size 512
+```
+
+`feasibility` works from parameters you type; this works from the collect, and
+from the measurement you actually intend. It checks the frequency against the
+dwell's resolution, against the sub-aperture Nyquist, against the observation
+ratio, and against the displacement-averaging nulls; it checks the aperture
+fraction against the range anyone has validated, the grid width against the
+spectral route's requirement, the PRF stability against the uniform-timing
+assumption, and the amplitude against the tracker's quantisation floor.
+
+**Run it before every measurement.** It costs a metadata read; the thing it
+prevents costs twenty minutes and produces a complete, plausible, wrong answer.
+The configuration used in `runs/giza/2026-07-30-validated-spot-khufu` fails it
+on one line:
+
+```
+FAIL  observation ratio   t_sap 1.6434 s at 2.000 Hz gives eta 3.287. The
+      sub-look RESOLVES the paired echoes, the tracked feature fragments, and
+      correlation tracking fails at any amplitude. At this aperture fraction
+      eta stays under 0.20 only below 0.122 Hz.
+```
+
+That run was made before this command existed, took twenty minutes, and its
+conclusion had to be withdrawn.
+
+**Every check is necessary and none is sufficient.** The last line always reads
+`UNKNOWN ground truth`, because whether anything in the scene moves is not a
+property of the file. A clean verdict means the configuration is capable, not
+that the measurement is real.
+
+---
+
 ## Step 3 — find your target
 
 The processing grid is much smaller than the area the satellite covered, and by

@@ -134,6 +134,7 @@ vendor it was written against.
 | `phaselink.c` | split-band phase linking across a whole stack |
 | `microm.c` | per-window tracking; owns the estimator choice |
 | `ccd.c` | scale-invariant change detection over a sub-aperture stack |
+| `validate.c` | pre-flight checks of a collect against an intended measurement |
 | `spectrum.c` | windowed periodograms, dominant frequency, prominence |
 | `tomo.c` | the four depth models and their solvers, and the alignment null |
 | `simulate.c` | synthetic phase history over a real collect's geometry |
@@ -247,6 +248,7 @@ arguments prints full usage.
 |---|---|---|
 | `feasibility` | acquisition parameters | the observable vibration band and its cost in resolution |
 | `info` | any supported file | geometry and timing; validates the file |
+| `validate` | `rs_cphd_t` + an intended measurement | whether the collect can support it, check by check, before any processing |
 | `focus` | `rs_cphd_t` | a focused image, written as PNG or PGM |
 | `mmotion` | `rs_cphd_t` | vibration spectra per window, null-test results, and with `--ccd-out` a change-detection map |
 | `tomo` | `rs_cphd_t` | depth profiles, a section image, a float32 cube, and with `--geocode` a CSV of window centres in latitude and longitude |
