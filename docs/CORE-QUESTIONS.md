@@ -102,19 +102,42 @@ not aware of a use of azimuth sub-aperture separation as a height baseline.
 
 ---
 
-## 4. Is `lambda = v/f` or `v/(2f)`, and what is `f`?
+## 4. Why does a mechanical wavelength appear where the radar one belongs?
 
-The patent states `lambda = v/f` and works it as `6600/22000 = 0.30 m`. The Giza
-preprint computes `6000/12500 = 0.48 m`. The published Giza paper reports
-approximately `0.24 m`, which is `v/(2f)`.
+The factor-of-two question below is the smaller half of this. The prior question
+is which wave `lambda` refers to at all.
 
-- Which convention is authoritative? The answer is a factor of two on every
-  depth.
+`K_z = 4*pi*B_perp/(lambda*r_i*sin(theta))` is the standard TomoSAR vertical
+wavenumber, and in every independent derivation of it `lambda` is the **radar
+carrier wavelength** `lambda_c = c/f_c` -- Zhu & Bamler (*Very High Resolution
+Spaceborne SAR Tomography in Urban Environment*, TGRS 48(12), 2010); Kim,
+Villano & Krieger (*Volume Structure Retrieval Using Drone-Based SAR
+Interferometry*, RS 16(8), 2024), who write the same expression directly as
+`4*pi*B_perp*f_c/(c*R*sin(theta))`.
+
+The patent instead supplies a **mechanical** wavelength: an elastic wave speed
+and a vibration frequency, `6600/22000 = 0.30 m`. The arithmetic is a correct
+`lambda_s = v_s/f_v`; the question is why `lambda_s` stands in a formula derived
+with `lambda_c`. The micro-Doppler literature keeps them strictly apart --
+Clemente & Soraghan carry radar phase through `lambda_c` and the mechanical
+motion separately as `A_v*cos(omega_v*eta)`, coupled but never interchangeable.
+
+**This compounds with question 3.** `K_z` then carries two substitutions at
+once: an along-track separation standing in for an elevation-sensitive
+baseline, and a mechanical wavelength standing in for the radar one. Either
+alone removes the expression's derivation.
+
+- What derivation licenses `lambda_s` in place of `lambda_c` here? At minimum it
+  would need the coupling from a subsurface elastic mode to surface
+  displacement, from that displacement to SAR phase, and from mechanical
+  frequency to a spatial depth wavenumber.
+- Which convention is authoritative for the wavelength itself? The patent states
+  `lambda = v/f` and works `6600/22000 = 0.30 m`; the Giza preprint computes
+  `6000/12500 = 0.48 m`; the published Giza paper reports approximately `0.24 m`,
+  which is `v/(2f)`. The answer is a factor of two on every depth.
 - Is `f` a measured vibration frequency or a processing parameter? A
   sub-aperture sequence over a 33 s dwell samples surface motion at a few hertz,
   not at 12.5 or 22 kHz.
-
----
 
 ## 5. Does `N_D * dt = t_sap` follow as intended?
 
