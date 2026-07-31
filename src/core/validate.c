@@ -57,7 +57,26 @@
  * that window all miss. A ceiling must clear the floor by a real margin, not
  * merely exceed it, and where that margin lies is not measured.
  *
- * One geometry and one cell size -- see RS_VALIDATE_AMBIGUITY. */
+ * HOW IT SCALES IS NOT KNOWN, AND THE PIXEL READING IS REFUTED. Expressing the
+ * floor in pixels implies it shrinks in metres as the cell shrinks, so a finer
+ * grid would buy sensitivity. It does not. Holding the physical scene and
+ * window fixed at 128 m and 12.8 m and halving the cell from 0.4 m to 0.2 m,
+ * a 1.2 m peak-to-peak excursion -- 6 px at the finer cell, comfortably above
+ * a 4 px floor -- misses at BOTH cells. Two clean misses where the pixel
+ * reading predicts a recovery.
+ *
+ * The obvious replacement, a fixed fraction of the sub-look resolution cell,
+ * is refuted by different data: it makes the ceiling and floor both
+ * proportional to that cell, so the window is always open at a fixed 7.5x
+ * ratio, while the uniform route at 159 looks and 0.88 overlap was measured
+ * CLOSED -- targets at 4.0, 4.4 and 4.8 px all missing inside the window it
+ * predicts.
+ *
+ * So the number below holds at the geometry and cell it was measured at, and
+ * the figures this file derives from it at other cells are NOT established.
+ * Treat them as order-of-magnitude. Settling this needs a designed experiment
+ * over cell, sub-look resolution and window size in pixels, which are confounded
+ * in every run made so far. See runs/giza/2026-07-30-validated-spot-khufu/. */
 #define RS_TRACK_FLOOR_PX 7.0
 
 #define RS_ALPHA_LO 0.045
@@ -348,8 +367,9 @@ rs_validate_level_t rs_validate(const rs_validate_req_t *req,
                      "rather than a verdict.");
         }
         WORST(rs_v_add(out, &n, RS_VALIDATE_SENSITIVITY, lvl, "sensitivity",
-              "the measured floor is %.1f px p2p, which at %.2f m cells is a "
-              "vertical amplitude of %.3f mm at %.3f Hz. %s Sub-pixel "
+              "the floor measured at 0.4 m cells is %.1f px p2p; carried to "
+              "%.2f m cells -- which is NOT established, see rs_validate() -- "
+              "that is a vertical amplitude of %.3f mm at %.3f Hz. %s Sub-pixel "
               "refinement at 1/%zu px reaches %.4f px, %.0fx finer -- that is "
               "an interpolation limit, not a demonstrated sensitivity.",
               RS_TRACK_FLOOR_PX, req->cell_m, 1000.0 * a_min, f, verdict,

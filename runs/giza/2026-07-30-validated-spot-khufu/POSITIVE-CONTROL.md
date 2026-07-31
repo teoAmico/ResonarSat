@@ -521,3 +521,82 @@ spans 14.5 s of a 32.9 s dwell. Its band is 0.0345 Hz. **Every frequency it
 reported is above it** -- 0.054 by 1.6x, 0.324 by 9.4x, 1.026 by 30x -- and that
 is the mechanism behind its own P5 observation that the peak follows `--fmin`.
 Amended in that run's RUN.md. Configuration B is inside its band and unaffected.
+
+---
+
+# 2026-07-31, fifth pass: how the floor scales is not known
+
+`resonarsat validate` was run on the real collect for the first time. It works
+end to end -- 13 checks, `VERDICT: FAIL` for a 5 mm target at 0.1 Hz, because
+that is 0.1x the floor it computes. Everything below came from trying to answer
+the question that verdict raises: **is there any operating point on this collect
+that passes?**
+
+## The optimisation, and why it was wrong
+
+Both amplitude bounds move with configuration:
+
+```
+floor   = FLOOR_PX * cell / k(f)          k(f) = R*2*pi*f*cos(theta)/v
+ceiling = 0.75 * res_sap / k(f)
+```
+
+Read that way the floor scales with the CELL and the ceiling does not, so a
+finer grid buys sensitivity for free. Sweeping alpha and cell over the Giza
+geometry with `f` at the eta = 0.20 limit, the best point came out at **0.3 mm
+vertical at 3.04 Hz** (alpha 0.002, cell 0.125 m) with a 44x window -- which
+would have made the collect capable of the published claim after all.
+
+It rests entirely on the floor being a fixed pixel count. That was measured at
+one cell size and never tested.
+
+## Tested, and refuted
+
+Holding the physical scene at 128 m and the physical window at 12.8 m, so only
+the cell changes:
+
+| target p2p | cell 0.2 m (win 64) | cell 0.4 m (win 32) |
+|---|---|---|
+| 1.2 m | 0.958 miss | 0.756 miss |
+
+At the finer cell 1.2 m is **6 px**, comfortably above the 4 px textured floor,
+and it misses. Two clean misses where the pixel reading predicts recovery.
+**A finer cell does not buy sensitivity, and the 0.3 mm figure is withdrawn.**
+
+An earlier sweep in the same design confounded cell with window size in pixels
+-- halving the cell at fixed physical window drops `--win` from 32 to 16, and
+narrow pixel windows were already recorded above as producing confident wrong
+answers. The 0.8 m column of that sweep is uninterpretable for that reason.
+
+## The obvious replacement is also refuted
+
+If the floor were a fixed fraction of the sub-look resolution cell it would
+transfer across collects, which is what a validator wants. Varying `n_looks` at
+fixed cell is suggestive -- 1.2 m p2p recovers at 64 looks (res 4.06 m) and
+misses at 128 and 256 (8.13 m, 16.26 m).
+
+But it fails against data already in hand. Both bounds would be proportional to
+`res_sap`, making the window always open at a fixed 7.5x ratio, while the
+uniform route at 159 looks and 0.88 overlap was measured **closed** -- targets
+at 4.0, 4.4 and 4.8 px all missing inside the window it predicts. And the
+64-look recovery is weak: `df` is 0.050 Hz there and it reported 0.450 against
+0.500, a full bin off, where every clean recovery in this file reads 0.504.
+
+## Where it stands
+
+- pixel floor: **refuted** (two clean misses at the finer cell)
+- fraction-of-`res_sap` floor: **refuted** (predicts an open window measured closed)
+- fixed in metres: survives, but only by discounting the marginal 64-look result
+
+`src/core/validate.c` implements the pixel reading. Its comment now says the
+scaling is refuted and that figures derived at other cells are not established;
+the constant itself is unchanged, because it is still what was measured at the
+cell it was measured at.
+
+**Cell size, sub-look resolution and window size in pixels are confounded in
+every run made so far**, including all of today's. Separating them needs a
+designed experiment that varies each independently -- which means accepting
+physical windows smaller than a sub-look resolution cell in some arms, and
+correlation windows of 128 px or more in others. Until that is done, the
+question this pass opened -- whether any operating point on this collect
+passes -- has no answer.
