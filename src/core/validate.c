@@ -283,11 +283,33 @@ rs_validate_level_t rs_validate(const rs_validate_req_t *req,
         WORST(rs_v_add(out, &n, RS_VALIDATE_PRF_STABILITY, lvl, "PRF stability",
               "instantaneous PRF spans %.2f%% of nominal; largest gap is %.1f "
               "pulse intervals. The sub-aperture stage lays centre times on a "
-              "uniform grid, so this enters as a time-base distortion.%s",
+              "uniform grid, so this enters as a time-base distortion -- a "
+              "scale error on the frequency axis, not a phase artefact.%s",
               spread, gap_intervals,
               (lvl == RS_V_WARN) ? " Large enough to check before trusting a "
                                    "frequency." : ""));
     }
+
+    /* A NOTE ON WHAT THIS CHECK IS AND IS NOT. Baehr (DGK Reihe C 719, KIT
+     * 2013) Sect. 3.4.2 classes a biased PRF as a CLOCK error rather than a
+     * timing error, and Sect. 3.4.3 states that "as long as coregistration is
+     * implemented by amplitude cross-correlation, the interferometric phase
+     * measurement is completely insensitive to errors in f_PRF and f_RSR".
+     *
+     * That does not make the check above redundant, because the mechanism here
+     * is a different one. This project does not coregister two acquisitions; it
+     * uses pulse times to place sub-aperture centres on the time axis of a
+     * spectrum. A PRF error there distorts that axis directly, whatever the
+     * phase does.
+     *
+     * What Baehr identifies as the error that DOES corrupt phase -- carrier
+     * frequency drift -- this project has never examined. He cites short-term
+     * ERS-1 drifts up to 82 Hz/s "that started and stopped abruptly and lasted
+     * some tens of seconds", the same timescale as a long-dwell spotlight
+     * collect, and notes such errors "were neither expected nor are they easy
+     * to validate". Whether a drift within one dwell enters a single-pass
+     * sub-aperture series, and what it would look like if it did, is an open
+     * question and not checked anywhere here. */
 
     /* ---- the smallest motion the tracker could see ------------------------ */
     if (f > 0.0 && req->cell_m > 0.0 && req->upsample > 0) {

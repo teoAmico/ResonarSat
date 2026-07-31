@@ -264,3 +264,47 @@ A compact package answering the following would resolve most of the questions:
 Until those items are available, ResonarSat treats the conventional
 `exp(j*Kz*z)` formulation as the default interpretation and the printed
 `2*pi*t` factor as an explicitly labelled experimental sensitivity test.
+
+---
+
+## 11. Carrier frequency drift within a single dwell
+
+Not a question for the sources -- a mechanism this project has never examined,
+recorded so it is not mistaken for one that has been.
+
+Bähr, *Orbital Effects in Spaceborne SAR Interferometry* (DGK Reihe C 719, KIT
+2013), separates three error families that this project has been treating as
+one. Section 3.4.2 classes a biased pulse repetition frequency as a **clock**
+error rather than a timing error, and section 3.4.3 finds that "as long as
+coregistration is implemented by amplitude cross-correlation, the
+interferometric phase measurement is completely insensitive to errors in
+`f_PRF` and `f_RSR`", whereas carrier frequency biases "can indeed produce
+significant artefacts".
+
+`RS_VALIDATE_PRF_STABILITY` measures the first of these. Its concern is
+legitimate but different from Bähr's: this project does not coregister two
+acquisitions, it uses pulse times to place sub-aperture centres on the time axis
+of a spectrum, so a PRF error distorts that axis directly. The check stands.
+
+**The error Bähr identifies as the one that corrupts phase is unmeasured here.**
+He reports short-term ERS-1 carrier drifts of up to 82 Hz/s "that started and
+stopped abruptly and lasted some tens of seconds", citing Massonnet and Vadon
+(1995), and notes that such errors "were neither expected nor are they easy to
+validate". Tens of seconds is the timescale of a long-dwell spotlight collect --
+Giza is 32.869 s.
+
+Open:
+
+- Does a carrier drift *within* one dwell enter a single-pass sub-aperture
+  series, given that both sub-looks come from the same acquisition and share the
+  drift, or does the common term cancel?
+- If it does not cancel, a drift makes the phase-to-displacement scale vary
+  across the dwell. That would appear as a slowly varying apparent displacement
+  -- energy in the lowest spectral bins, which is where this implementation's
+  null results have repeatedly landed.
+- Is the drift observable in a CPHD's own metadata, or would it have to be
+  estimated from the data?
+
+Nothing here asserts that this affects any run. It is listed because the
+mechanism is documented in the InSAR literature, is on the right timescale, and
+has not been ruled out.

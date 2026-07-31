@@ -141,7 +141,24 @@ typedef struct {
      * baselines across a repeat-pass stack -- hundreds of metres to a couple of
      * kilometres. Resolution improves with this quantity, so treating an
      * along-track arc as though it were an elevation baseline buys an
-     * improvement of one to two orders of magnitude on paper. */
+     * improvement of one to two orders of magnitude on paper. On the Giza
+     * collect the arc is 238.7 km against a repeat-pass spread of order 0.5 km,
+     * and delta_T = lambda*R/(2*A) turns that into 0.051 m of depth resolution
+     * where the genuine baseline gives 24.6 m -- a factor of 477.
+     *
+     * The standard decomposition says why this is not a matter of scale alone.
+     * Baehr, Orbital Effects in Spaceborne SAR Interferometry (DGK Reihe C 719,
+     * KIT 2013), Sect. 3.1, defines B_perp two ways: the scalar
+     * sqrt(|B|^2 - B_par^2), and the cross-track projection actually used for
+     * height, which is stated to hold only "assuming B_a ~ 0" -- B_a being the
+     * along-track component -- and to bias the height ambiguity otherwise.
+     *
+     * A sub-aperture separation is ENTIRELY B_a. Under the zero-Doppler
+     * condition the line of sight is perpendicular to the velocity, so the
+     * scalar form returns B_par = 0 and B_perp = |B|: the whole separation,
+     * finite and ordinary-looking, from a vector that produces no parallax
+     * across the line of sight and therefore no height sensitivity. Models A
+     * and B use exactly that number. See docs/CORE-QUESTIONS.md question 3. */
     double aperture;
 
     /* Radar wavelength in metres, used by Model C. Model C makes no acoustic
