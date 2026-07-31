@@ -1,7 +1,9 @@
 # Independent implementation verification
 
-Date: 2026-07-29  
-Code audited: the tree published as the initial commit
+First audited: 2026-07-29, against the tree at the initial commit
+Revised: 2026-07-31, against master. The original findings stand; several are
+sharpened below with results obtained since, and three defects in this
+implementation — not in the patent — were found and corrected in the interval.
 
 ## Question
 
@@ -175,6 +177,18 @@ There is also a geometric conflict: with `N_D` master windows of width
 headroom remains for the final slave. A larger freely selectable `B_shift`
 places the last slave outside the measured Doppler support.
 
+The patent's one stated property implies the rule it never gives. The pair
+response `|2 sin(pi f dt)|` peaks at `f*dt = 1/2`, so the lag that maximises
+sensitivity to frequency `f` is `B_shift_opt = B_CD/(2*f*t_dwell)` -- inversely
+proportional to `f`, exactly as the patent describes. Imposing the geometric cap
+above gives `f >= N_D/(2*t_sap)`: **the lowest frequency `B_shift` can be tuned
+to is `N_D` times the highest the layout can observe**, independent of dwell and
+collect. Reading `B_shift` as independent of the sweep, which the patent's
+wording allows, lets the sweep span shrink to buy separation; the two then
+compete for the same headroom and the requirement becomes a factor `3*(1-L)/L`
+above the band edge, which is 3 at the stated `B_DL = B_CD/2`. Neither reading
+reaches an observable frequency. See `docs/CORE-QUESTIONS.md` question 6.
+
 ### 2. The default patent pair is a temporal difference
 
 When `B_shift` equals the sweep step, `slave(i)` and `master(i+1)` are the same
@@ -185,6 +199,13 @@ without accumulation. That observable has response
 
 and is weak at low frequency. The code models this fact, but the patent does
 not describe the required response correction.
+
+Quantified at the band edge, with `B_shift` pinned to the printed step: the
+differential costs 20 dB at `N_D = 32`, 32 dB at 128 and 44 dB at 512 --
+worsening with the very parameter one would raise for finer time sampling. For
+contrast, Multiple Aperture InSAR (Bechor & Zebker 2006) performs the same
+two-sub-aperture operation at a normalised squint of 0.5, half the total Doppler
+band, which is 128 times the paper's separation at `N_D = 128`.
 
 ### 3. The printed paper layout creates a measurement null
 
@@ -197,6 +218,13 @@ position averaged across the sub-aperture; a rectangular sub-aperture has sinc
 zeros at integer multiples of that spacing. Thus the exact patent layout places
 its resolvable bins at the averaging response's nulls.
 
+This is now exact rather than qualitative. Since the bin spacing is `1/t_sap`
+while the averaging response reaches only `1/(2*t_sap)`, **the first bin sits at
+exactly twice the band edge, for every `N_D` and every `B_DL`** -- no parameter
+choice moves it, and it falls precisely on the first averaging null. Measured on
+a synthetic collect at 20 s dwell: 0.100 Hz reported against a 0.050 Hz band,
+sub-aperture response -240 dB, observation ratio exactly 1.00.
+
 The current Giza run observes this predicted failure: 225/225 windows remain
 below the tracking quantisation floor.
 
@@ -207,6 +235,26 @@ the project's reading of the sources, substitutes progressive along-orbit
 sub-aperture phase-centre separation. An along-track baseline is not generally
 an elevation baseline. Independent SAR tomography normally obtains elevation
 wavenumber diversity from genuinely different look geometries/baselines.
+
+The standard decomposition makes this sharper than "an along-track baseline is
+not generally an elevation baseline". Bähr (*Orbital Effects in Spaceborne SAR
+Interferometry*, DGK Reihe C 719, KIT 2013, Sect. 3.1) gives the cross-track
+form used for height as valid only "assuming `B_a ~ 0`", `B_a` being the
+along-track component, and warns it otherwise biases the height ambiguity. A
+sub-aperture separation is *entirely* `B_a`.
+
+The consequence is not that `B_perp` vanishes. Under the zero-Doppler condition
+the line of sight is perpendicular to the velocity, so the general scalar form
+`B_perp = sqrt(|B|^2 - B_par^2)` returns `B_par = 0` and `B_perp = |B|` -- the
+whole separation, finite and ordinary-looking, from a vector that produces no
+parallax across the line of sight. `K_z` accepts the number and returns a normal
+depth axis. On the Giza collect the along-orbit arc is 238.7 km against a
+repeat-pass baseline spread of order 0.5 km, so `delta_T = lambda*R/(2*A)` reads
+0.051 m where a genuine baseline gives 24.6 m.
+
+Moreira et al. draw the same distinction from the other side: across-track
+separation gives elevation sensitivity, along-track separation gives a temporal
+lag and hence velocity sensitivity. They are different observables.
 
 This is the main physical issue in the depth stage, not a numerical coding
 detail.
@@ -228,6 +276,13 @@ depth resolution, without independently demonstrating the measurement equation
 that connects a buried acoustic source to the phase of surface radar
 scatterers. Correctly evaluating that substituted equation does not validate
 the substitution.
+
+Taken with problem 4, `K_z` carries **two** substitutions at once: an
+along-track separation standing in for an elevation-sensitive baseline, and a
+mechanical wavelength standing in for the radar one. Either alone removes the
+expression's derivation. `docs/CORE-QUESTIONS.md` question 4 now leads with the
+wavelength substitution rather than with the `v/f` versus `v/(2f)` discrepancy,
+which is the smaller half of it.
 
 ### 7. Eq. 22 across the source family
 
@@ -315,10 +370,64 @@ Accordingly, “implements the whole patent equations as written” is false.
 “Implements the patent's Figure 0.5 processing chain under a documented
 interpretation of Eqs. 21–24” is the defensible description.
 
+## Defects found in this implementation, not in the patent
+
+Distinguished from the specification problems above because these were ours and
+are corrected. All three produced complete, plausible output while wrong, which
+is the failure mode the whole project exists to guard against.
+
+1. **The observable band was computed from the sub-aperture step, not from
+   `t_sap`.** Each sub-aperture averages the motion over its own duration, so
+   the series carries nothing above `1/(2*t_sap)` however finely overlap samples
+   it; quoting the step's `1/(2*dt)` overstates the reach by `1/(1-overlap)`, a
+   factor of 100 at 0.99 overlap. Every frequency configuration A of
+   `runs/giza/2026-07-30-uniform-phase-khufu` reported lies above the band it
+   could carry. This also restores `eta < 0.5` as a derived bound, since
+   `eta = f*t_sap`.
+
+2. **The coherence mask could be vacuous.** Overlapping sub-looks share spectral
+   content by construction, so the pair-averaged estimator has a floor no scene
+   can push it below. At 0.99 overlap that floor is 0.574 against the 0.4 mask
+   the run actually used: it passed every window it was given.
+
+3. **The sensitivity figure reported the sub-pixel interpolation limit**, not the
+   excursion at which the tracker returns the target's frequency rather than its
+   own artefact — optimistic by a factor of 57.
+
+All three are now computed ahead of processing by `resonarsat validate`, whose
+checks are pinned by `tests/test_validate.c` against configurations whose
+outcome is already known from measurement. How the tracker's floor scales with
+cell size, sub-look resolution and window size in pixels remains **unresolved**:
+three candidate laws have been refuted and those factors are confounded in every
+run made so far.
+
 ## Executed verification
 
 Both Release and AddressSanitizer/UndefinedBehaviorSanitizer configurations
-passed all 20 registered tests.
+pass all 23 registered tests.
+
+### How recovery is judged
+
+A per-point match -- `|recovered - injected|` inside a tolerance at a single
+frequency -- is too weak to establish anything, and was the source of five
+conclusions drawn and withdrawn on 2026-07-31. A chain emitting a FIXED spurious
+frequency passes it wherever that value happens to fall near the injection: one
+configuration reported 1.569 Hz for every injection from 0.2 to 1.4 Hz and
+scored "recovered" at several of them.
+
+`rs_track_fit()` in `tests/rs_test.h` replaces it. The injected frequency is
+swept and the reported value fitted against it, requiring slope near 1 -- a
+fixed artefact gives 0, and no single point can tell the two apart -- and rms
+under half a bin. `test_nullmotion` asserts both, plus a negative control that
+must reject a constant series.
+
+That criterion sweeps frequency, not speckle. A five-point sweep passing on one
+clutter realisation was later found to pass a configuration that fails on
+another, so a claim about a *configuration* needs the sweep repeated over
+independent `--seed` realisations and the verdicts pooled.
+
+The tables below therefore stand as measurements, while the "pass" verdicts in
+the first of them rest on the older per-point test.
 
 Measured synthetic correlation results at 20 mm amplitude:
 
@@ -331,8 +440,13 @@ Measured synthetic correlation results at 20 mm amplitude:
 | 1.10 Hz | 2.213 Hz | false second harmonic; look count below required bound |
 | 1.30 Hz | 1.308 Hz | recovered despite being below recommended look count |
 
-Four of four 0.3–0.9 Hz injected cases exceeded the separately measured static
-false-positive floor in `test_nullmotion`.
+At `test_nullmotion`'s operating point -- 128 looks, zero overlap, the settings
+the phase-ambiguity condition demands -- the same sweep recovers 0.302, 0.504,
+0.706 and 0.907 Hz for 0.3 to 0.9 Hz, four of four above the separately measured
+static false-positive floor, with **slope 1.008 and rms 0.0052 Hz against a
+0.0252 Hz bound**. The negative control, a constant 1.569 Hz, gives slope 0.000
+and rms 0.9945 Hz. The false second harmonics in the table above occur at the
+lower look counts, which the table marks as under-served.
 
 The synthetic phase case recovered 0.40 Hz as 0.407 Hz.
 
@@ -421,118 +535,21 @@ Pardini et al. independently use the same `exp(j*kappa_z*z)` convention
    elevation targets. This validates the steering/inversion machinery separately
    from the acoustic hypothesis.
 
+**Status at 2026-07-31: all six remain open.**
+
+Test 3 is the cheapest and is the recommended next. Every tracking failure
+recorded on 2026-07-31 is the *correlation* estimator; the phase route has a
+Cramér–Rao floor roughly 160x lower and has barely been exercised. Running
+`rs_track_fit()` over frequency and seed on the phase estimator would establish
+whether the difficulty is correlation-specific, and either outcome bounds the
+capability question more than further correlation sweeps would.
+
+Test 1 is blocked externally rather than by effort: `docs/DATASETS.md` records
+that no corner-reflector collect with synchronous ground truth exists in any
+open archive, and every validated result in this literature used one.
+
 Until those tests pass, surface vibration spectra may be reported with their
 null controls and operating bounds. Patent-derived depth products should be
 reported as experimental transforms under assumed `(v,f)` parameters, not as
 validated measurements of internal structure.
 
----
-
-# Addendum, 2026-07-31
-
-The audit above is scoped to the tree at the initial commit and is left as
-written. Two days of work have sharpened several of its findings, invalidated
-one of its measurements, and added checks it predates. Nothing in it is
-contradicted.
-
-## Corrections to the audit's own numbers
-
-**"all 20 registered tests" is now 23.** `test_validate`, `test_pairedecho` and
-`test_ccd` were added since.
-
-**The synthetic correlation table is superseded, and so is the criterion behind
-it.** Its verdicts are per-point matches -- `|recovered - injected|` inside a
-tolerance at one frequency. That criterion is now known to be far too weak: a
-chain emitting a FIXED spurious frequency passes it wherever that value falls
-near the injection. Five conclusions were drawn and withdrawn on 2026-07-31 for
-exactly this reason, among them a configuration reporting 1.569 Hz for every
-injection from 0.2 to 1.4 Hz.
-
-`rs_track_fit()` in `tests/rs_test.h` replaces it: sweep the injected frequency
-and fit the reported against it, requiring slope ~1 (a fixed artefact gives 0)
-and rms under half a bin. `test_nullmotion` asserts both plus a negative control
-that must reject a constant series. At the working operating point: slope 1.008,
-rms 0.0052 Hz against a 0.0252 Hz bound.
-
-A further limit found the same day: that criterion sweeps frequency, not
-speckle. A five-point sweep passing on one clutter realisation still passed a
-configuration that fails on another. Claims about a *configuration* need the
-sweep repeated over independent `--seed` realisations.
-
-## The critical specification problems, sharpened
-
-**#1 `B_shift`.** The patent's own stated property implies the rule it never
-gives. The pair response `|2 sin(pi f dt)|` peaks at `f*dt = 1/2`, so
-`B_shift_opt = B_CD/(2*f*t_dwell)` -- inversely proportional to `f`, as the
-patent says. Combined with the geometric conflict the audit identifies, the
-lowest frequency `B_shift` can be tuned to is exactly `N_D` times the highest
-the layout can observe. Reading `B_shift` as independent of the sweep instead
-gives a factor `3*(1-L)/L`, which is 3 at the stated `B_DL = B_CD/2`. See
-`docs/CORE-QUESTIONS.md` question 6.
-
-**#2 the temporal difference.** Quantified: at the band edge the differential
-costs 20 dB at `N_D = 32`, 32 dB at 128 and 44 dB at 512 -- worsening with the
-parameter one would raise for finer time sampling. For contrast, Multiple
-Aperture InSAR (Bechor & Zebker 2006) performs the same operation at a
-normalised squint of 0.5, half the total Doppler band: 128x the paper's
-separation at `N_D = 128`.
-
-**#3 the measurement null.** Now exact rather than qualitative. With the printed
-step, `N_D*dt = t_sap`, so the bin spacing is `1/t_sap` while the sub-aperture
-averaging response reaches only `1/(2*t_sap)`. **The first bin sits at exactly
-twice the band edge, for every `N_D` and every `B_DL`** -- no parameter choice
-moves it. Measured on a synthetic collect: 0.100 Hz reported against a 0.050 Hz
-band, response -240 dB, observation ratio exactly 1.00. This supplies the
-mechanism for the 225/225 sub-floor windows the audit records.
-
-**#4 `B_perp`.** The standard decomposition makes this sharper than "an
-along-track baseline is not generally an elevation baseline". Bähr (DGK Reihe C
-719, KIT 2013, Sect. 3.1) gives the cross-track form used for height as valid
-only "assuming `B_a ~ 0`", and a sub-aperture separation is *entirely* `B_a`.
-Under zero-Doppler the scalar form then returns `B_par = 0` and
-`B_perp = |B|` -- the whole separation, finite and ordinary-looking, from a
-vector producing no parallax across the line of sight. `K_z` accepts it and
-returns a normal depth axis. On Giza the arc is 238.7 km against a repeat-pass
-spread of order 0.5 km, so `delta_T` reads 0.051 m where a genuine baseline
-gives 24.6 m.
-
-**#6 the acoustic substitution.** `docs/CORE-QUESTIONS.md` question 4 now leads
-with this rather than with the `v/f` versus `v/(2f)` discrepancy, and notes that
-`K_z` carries two substitutions at once -- an along-track separation for an
-elevation baseline, and a mechanical wavelength for the radar one.
-
-## Defects found in this implementation since the audit
-
-These are the reproduction's own, not the patent's:
-
-- **The observable band was computed from the sub-aperture step, not from
-  `t_sap`**, overstating it by `1/(1-overlap)` -- a factor of 100 at 0.99
-  overlap. Every frequency the `uniform-phase-khufu` run's configuration A
-  reported lies above the band it could carry.
-- **The coherence gate can be vacuous.** Overlapping sub-looks share spectral
-  content by construction, so the pair-averaged estimator has a floor; at 0.99
-  overlap that floor is 0.574 against the 0.4 mask actually used.
-- **The sensitivity figure reported the sub-pixel interpolation limit**, not the
-  excursion at which the tracker returns the target's frequency -- optimistic by
-  a factor of 57.
-
-All three are corrected, with `resonarsat validate` now computing them ahead of
-processing. Its checks are pinned by `tests/test_validate.c` against
-configurations whose outcome is already known from measurement.
-
-## Required tests: status
-
-**All six remain open.** Test 3, estimator-specific validation, is the cheapest
-and the recommended next: every failure recorded on 2026-07-31 is the
-*correlation* tracker, while the phase route has a Cramer-Rao floor about 160x
-lower and has barely been exercised. Running `rs_track_fit()` over frequency and
-seed on the phase estimator would establish whether the difficulty is
-correlation-specific.
-
-Test 1 remains blocked externally: `docs/DATASETS.md` records that no
-corner-reflector collect with synchronous ground truth exists in any open
-archive.
-
-The audit's closing position is unchanged. Surface vibration spectra may be
-reported with null controls and operating bounds; depth products remain
-experimental transforms under assumed `(v, f)`.
