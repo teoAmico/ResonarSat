@@ -91,34 +91,31 @@ give that literature. This implementation has not reproduced it, and nothing her
 read as a demonstrated sensitivity. Measurements from the patent's own chain fail their null
 test outright.
 
-**Do not trust `--shuffle-looks` on a phase observable.** Destroying the sub-look time order
-inflates the per-step phase noise 36-fold, so a drifting series beats the roughened version of
-itself: at Giza a phase measurement clears the shuffle test at p = 0.03 and then reports the
-same frequency, within 1% of the same prominence, that the identical processing produces from
-a simulated world containing no motion. Use `--null-static`, which a motionless scene cannot
-walk over. The measurement is in
-[`runs/giza/2026-07-30-uniform-phase-khufu/`](runs/giza/2026-07-30-uniform-phase-khufu/RUN.md).
+**A wrong setting does not fail loudly.** This is the difficulty that shapes the whole
+project. Ask for a measurement the collect cannot support and you do not get an error or an
+empty image — you get a complete, well-formed spectrum with a confident peak in it, produced
+by the processing rather than by the ground. A motionless scene run through the same settings
+produces one too, often a *stronger* one.
 
-**Overlap does not widen the band.** The step between sub-apertures sets how finely the series
-is sampled, but each sub-aperture *averages* the motion over its own duration — a lowpass whose
-first null is at `1/t_sap`. So the observable band is `1/(2·t_sap)` no matter how finely overlap
-samples it, and quoting the step's `1/(2·dt)` overstates the reach by `1/(1-overlap)`. At 99%
-overlap that is a factor of 100. Since the observation ratio is `f · t_sap`, the band edge is
-exactly `η = 0.5`. A peak reported from beyond it is an artefact of the processing: a motionless
-target produces one too, at higher prominence than a real signal.
+Three ways that happens, each found in this project's own runs:
 
-**The sub-aperture length has an upper bound as well, and it is the one that bites.** The
-tracked azimuth excursion is squeezed from both sides: it must stay inside about three quarters
-of a **sub-look** resolution cell or the correlation argmax wraps, and it must exceed roughly
-7 px peak-to-peak or the tracker reports a fixed spurious frequency of its own instead. Since a
-longer sub-aperture sharpens the sub-look and so lowers the ceiling, **a long dwell is a
-liability here, not an asset** — and when the ceiling falls below the floor, *no* target
-amplitude works at any frequency. That is what the 32.9 s Giza collect does at the aperture
-fraction the published campaigns use, which is the real reason the Khufu runs measured nothing.
-Those campaigns run on far shorter dwells, so what transfers between collects is `t_sap` in
-seconds, not α as a fraction of dwell. `resonarsat validate` computes both bounds for a given
-collect and target before anything is processed.
+- **The frames are too long** to carry the frequency you asked for, so the answer comes from
+  outside the band the data can represent.
+- **The quality filter is set below a floor the measurement cannot go under**, so it rejects
+  nothing and every window passes.
+- **The ground moves too little, or too much,** for the tracker to follow — and if the
+  settings are wrong enough, there is no amount of movement it could follow.
 
+`resonarsat validate` checks these against a collect before any processing, in milliseconds.
+None of them shows that a measurement is *real* — whether the ground moves is not a property
+of the file — but each can rule a configuration out in advance instead of after twenty
+minutes and a plausible picture.
+
+**Null tests are the credibility check here, not an afterthought.** The one that matters
+compares a measurement against the identical processing applied to a simulated motionless
+world built on the real collect's own geometry. Note that shuffling the sub-aperture time
+order — the other obvious null — is *not* trustworthy for the phase estimator, and passing it
+means little; [`docs/USER-GUIDE.md`](docs/USER-GUIDE.md) explains when each applies.
 
 Three limits worth knowing before choosing a target:
 

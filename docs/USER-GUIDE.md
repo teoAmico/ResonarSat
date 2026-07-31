@@ -294,6 +294,26 @@ between them means an overlap of `1 - s/T`.
   overlap makes unlikely.
 - `splitband` uses all frame pairs at once and needs good coherence throughout.
 
+**The correlation tracker is squeezed from both sides, and can be squeezed shut.**
+The apparent slide it measures must be
+
+- *small enough*: inside about three quarters of one **frame's** resolution cell,
+  or the peak search wraps and reports a clean multiple of the true frequency;
+- *large enough*: above roughly 7 px peak-to-peak on an isolated target, or 4 px
+  against textured ground, or the tracker reports a fixed frequency of its own —
+  one a motionless scene produces too, at higher prominence than a real signal.
+
+A longer frame sharpens its resolution cell and so *lowers* the ceiling, while
+the floor stays put. When the ceiling drops below the floor, **no target
+amplitude works at any frequency**, and the run still returns a full result. That
+is what a 32.9 s collect does at the aperture fraction the published campaigns
+use, and it is why those campaigns' aperture *fraction* does not transfer between
+collects — what transfers is the frame length in seconds.
+
+`resonarsat validate` computes both bounds for your collect and target before
+anything is processed. How the floor scales with cell size and frame length is
+not yet established; treat the figure as order-of-magnitude.
+
 ### If no windows pass the coherence mask
 
 In order of likelihood:
