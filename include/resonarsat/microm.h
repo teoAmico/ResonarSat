@@ -165,11 +165,51 @@
  *
  *                           If it is fixed, amplitudes will still be attenuated
  *                           by |2 sin(pi f dt)| and not comparable to FIRST's.
+ *
+ *   RS_MICROM_REF_LAG       Each look against the one 'ref_lag' places before
+ *                           it, with NO accumulation. Untested; added to
+ *                           separate the two defects the other three carry.
+ *
+ *                           FIRST decorrelates: looks i and j share pulses only
+ *                           while |i-j| < 1/(1-overlap), so with a fixed
+ *                           reference the coherent span is a handful of looks
+ *                           out of hundreds. Measured on the single-target
+ *                           fixture, the correlation peak of look 0 against the
+ *                           rest averages 0.090 at zero overlap and only 0.310
+ *                           at 0.90, while ADJACENT PAIRS at 0.90 correlate at
+ *                           0.913. The coherence exists; a fixed reference
+ *                           discards it.
+ *
+ *                           ADJACENT keeps that coherence and then integrates
+ *                           tracking noise into a random walk. PAIR avoids the
+ *                           integrator but inherits the published sweep's
+ *                           geometry, where N*dt = t_sap puts every resolvable
+ *                           bin at an integer observation ratio -- a null of the
+ *                           averaging response.
+ *
+ *                           LAG is the remaining corner: a fixed short lag on
+ *                           the PULSE route. Coherence is set by the lag alone
+ *                           and stays high for small 'ref_lag'; nothing
+ *                           accumulates, so there is no random walk; and the
+ *                           record length is the whole dwell rather than one
+ *                           sub-look, so df = 1/T and the bins do NOT land on
+ *                           integer observation ratios the way the spectral
+ *                           sweep forces them to.
+ *
+ *                           Each sample is a displacement difference across
+ *                           ref_lag*dt, so the series is a first difference with
+ *                           response |2 sin(pi f ref_lag dt)|. That nulls at
+ *                           f = k/(ref_lag*dt); keep ref_lag small enough that
+ *                           the first null sits above the band of interest.
+ *                           Frequencies survive differencing, amplitudes are
+ *                           attenuated by that response and are NOT comparable
+ *                           to FIRST's.
  */
 typedef enum {
     RS_MICROM_REF_FIRST = 0,
     RS_MICROM_REF_ADJACENT = 1,
-    RS_MICROM_REF_PAIR = 2
+    RS_MICROM_REF_PAIR = 2,
+    RS_MICROM_REF_LAG = 3
 } rs_microm_ref_t;
 
 /* Which estimator computes the shifts.
@@ -288,6 +328,15 @@ typedef enum {
 typedef struct {
     rs_microm_estimator_t estimator;  /* how shifts are computed */
     rs_microm_ref_t reference;  /* which correlation reference (correlation only) */
+    /* Lag in looks for RS_MICROM_REF_LAG, ignored by every other mode.
+     *
+     * Small keeps coherence high -- looks share pulses while the lag is under
+     * 1/(1-overlap) -- and pushes the differencing null at 1/(ref_lag*dt) up
+     * out of the band. Both want it small; the only thing wanting it large is
+     * sensitivity, since |2 sin(pi f ref_lag dt)| grows with the lag until that
+     * null. Default 1, which is ADJACENT's spacing without ADJACENT's
+     * integrator. */
+    size_t ref_lag;
     size_t win_az, win_rg;      /* correlation patch size in pixels */
     size_t stride_az, stride_rg;/* step between patch centres, pixels */
     size_t upsample_az;         /* sub-pixel refinement factor along azimuth */

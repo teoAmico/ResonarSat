@@ -417,9 +417,10 @@ static int rs_parse_reference(int argc, char **argv, rs_subap_params_t *sp)
         if      (strcmp(name, "first") == 0)    ref = RS_MICROM_REF_FIRST;
         else if (strcmp(name, "adjacent") == 0) ref = RS_MICROM_REF_ADJACENT;
         else if (strcmp(name, "pair") == 0)     ref = RS_MICROM_REF_PAIR;
+        else if (strcmp(name, "lag") == 0)      ref = RS_MICROM_REF_LAG;
         else {
             fprintf(stderr, "unknown --reference '%s'; expected first, "
-                            "adjacent or pair\n", name);
+                            "adjacent, pair or lag\n", name);
             return -1;
         }
     }
@@ -1168,7 +1169,8 @@ static int rs_cmd_mmotion(int argc, char **argv)
                "                          [--estimator correlation|phase|splitband]\n"
                "                          [--shuffle-looks SEED] [--null-trials N]\n"
                "                          [--fmin HZ]\n"
-               "                          [--reference first|adjacent|pair]\n"
+               "                          [--reference first|adjacent|pair|lag]\n"
+               "                          [--lag N]\n"
                "                          [--b-shift HZ] [--shifts FILE.csv]\n"
                "                          [--upsample N]\n"
                "                          [--size N] [--cell M] [--win N]\n"
@@ -1288,6 +1290,7 @@ static int rs_cmd_mmotion(int argc, char **argv)
     rs_microm_params_t mp;
     rs_microm_params_default(&mp);
     mp.reference = (rs_microm_ref_t)ref_mode;
+    mp.ref_lag   = (size_t)rs_opt_double(argc, argv, "--lag", 1.0);
     mp.no_optimize = no_optimize;
     {
         /* --estimator selects WHAT is measured, not merely how well. Phase and
@@ -2083,6 +2086,7 @@ static int rs_cmd_tomo(int argc, char **argv)
     rs_microm_params_t mp;
     rs_microm_params_default(&mp);
     mp.reference = (rs_microm_ref_t)ref_mode;
+    mp.ref_lag   = (size_t)rs_opt_double(argc, argv, "--lag", 1.0);
     mp.no_optimize = no_optimize;
     {
         /* --estimator selects WHAT is measured, not merely how well. Phase and

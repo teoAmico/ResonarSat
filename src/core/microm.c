@@ -26,6 +26,7 @@ void rs_microm_params_default(rs_microm_params_t *params)
      * Until that accumulation is handled, FIRST is the better default. */
     params->estimator = RS_MICROM_EST_CORRELATION;
     params->reference = RS_MICROM_REF_FIRST;
+    params->ref_lag = 1;
     params->win_az = 64;
     params->win_rg = 64;
     params->stride_az = 16;
@@ -469,13 +470,28 @@ resonarsat_status_t rs_microm_track(const rs_subap_stack_t *stack,
                     const size_t idx = (size_t)w * n_looks + k;
 
                     /* PAIR measures slave(k) against master(k), so every k
-                     * carries a sample -- there is no zero reference look. */
-                    if (k == 0 && params->reference != RS_MICROM_REF_PAIR) {
+                     * carries a sample -- there is no zero reference look. LAG
+                     * has no sample until the lag is available. */
+                    const size_t lag = (params->reference == RS_MICROM_REF_LAG)
+                                     ? ((params->ref_lag > 0) ? params->ref_lag : 1)
+                                     : 0;
+                    if (params->reference == RS_MICROM_REF_LAG ? (k < lag)
+                        : (k == 0 && params->reference != RS_MICROM_REF_PAIR)) {
                         out->disp_az[idx] = out->disp_rg[idx] = out->disp_los[idx] = 0.0;
                         continue;
                     }
 
-                    if (params->reference == RS_MICROM_REF_PAIR) {
+                    if (params->reference == RS_MICROM_REF_LAG) {
+                        /* The reference moves with the look, so it is re-extracted
+                         * each time rather than held from look 0. That is the whole
+                         * point of the mode: coherence is set by the lag alone. */
+                        if (rs_coreg_extract(&stack->look[k - lag], az0, rg0,
+                                             win_az, win_rg, pref) != RS_OK)
+                            continue;
+                        if (rs_coreg_extract(&stack->look[k], az0, rg0,
+                                             win_az, win_rg, pcur) != RS_OK)
+                            continue;
+                    } else if (params->reference == RS_MICROM_REF_PAIR) {
                         if (rs_coreg_extract(&stack->look[k], az0, rg0,
                                              win_az, win_rg, pref) != RS_OK)
                             continue;
