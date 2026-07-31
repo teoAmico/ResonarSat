@@ -224,11 +224,25 @@ int main(void)
             printf("    %-24s -> %s\n", cases[i].why, rs_status_str(st));
             RS_CHECK(st != RS_OK);
             rs_slc_free(&img);
+
+            /* The metadata-only path must refuse exactly what the full read
+             * refuses. It skips the pixel pass, not the container checks, and a
+             * screening command that accepts files the processing path rejects
+             * would pass collects that cannot then be run. */
+            rs_slc_t meta;
+            memset(&meta, 0x3C, sizeof meta);
+            const resonarsat_status_t mst = rs_read_sicd_meta(sic, &meta);
+            RS_CHECK(mst == st);
+            rs_slc_free(&meta);
         }
         RS_CHECK_ERR(rs_read_sicd(NULL, &(rs_slc_t){0}), RS_ERR_ARG);
         RS_CHECK_ERR(rs_read_sicd(sic, NULL), RS_ERR_ARG);
+        RS_CHECK_ERR(rs_read_sicd_meta(NULL, &(rs_slc_t){0}), RS_ERR_ARG);
+        RS_CHECK_ERR(rs_read_sicd_meta(sic, NULL), RS_ERR_ARG);
         rs_slc_t img2;
         RS_CHECK_ERR(rs_read_sicd("/nonexistent/x.nitf", &img2), RS_ERR_IO);
+        rs_slc_t img3;
+        RS_CHECK_ERR(rs_read_sicd_meta("/nonexistent/x.nitf", &img3), RS_ERR_IO);
         remove(sic);
     }
 

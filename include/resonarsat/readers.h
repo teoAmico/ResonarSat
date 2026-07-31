@@ -141,4 +141,21 @@ resonarsat_status_t rs_read_cphd(const char *path, const rs_cphd_read_opts_t *op
  * is absent. */
 resonarsat_status_t rs_read_sicd(const char *path, rs_slc_t *img);
 
+/* Read a SICD product's metadata, leaving its pixels on disk.
+ *
+ * Every field rs_read_sicd() sets is set here too -- geometry, timing, carrier,
+ * spacings, dimensions -- except that '*img' owns no sample buffer and 'data'
+ * stays NULL. Do not pass the result to anything that reads pixels.
+ * rs_slc_free() is still the correct way to release it.
+ *
+ * The distinction is worth having because the two costs differ by orders of
+ * magnitude. A spotlight SICD of 40000 x 40000 samples is 12.8 GB as complex
+ * float, and the geometry needed to decide whether a collect can support a
+ * measurement is a few hundred bytes of XML sitting behind it. 'resonarsat
+ * validate' uses this so that screening a collect does not cost more than
+ * processing one.
+ *
+ * Fails exactly where rs_read_sicd() fails, minus the pixel pass. */
+resonarsat_status_t rs_read_sicd_meta(const char *path, rs_slc_t *img);
+
 #endif /* RESONARSAT_READERS_H */

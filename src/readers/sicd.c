@@ -75,6 +75,23 @@ static float rs_be_float(const unsigned char *p, int swap)
     return f;
 }
 
+/* Decode a big-endian signed 16-bit sample, as RE16I_IM16I stores I and Q.
+ *
+ * The integers are returned unscaled. SICD gives no scale factor for this pixel
+ * type -- unlike AMP8I_PHS8I, which carries an amplitude table -- so there is no
+ * radiometric constant to apply and inventing one would put a fabricated number
+ * where a measured one belongs. Nothing downstream is harmed by that: this
+ * project treats amplitudes as qualitative throughout, and every quantity it
+ * reports is a frequency, a displacement or a correlation, all of which are
+ * invariant to a constant scaling of the image. */
+static float rs_be_i16(const unsigned char *p, int swap)
+{
+    uint16_t u;
+    memcpy(&u, p, sizeof u);
+    if (swap) u = (uint16_t)(((u & 0x00ffU) << 8) | ((u & 0xff00U) >> 8));
+    return (float)(int16_t)u;
+}
+
 /* Text of the first <tag> in 'xml', or 0 if absent. See the note in cphd.c on
  * why a tag scan rather than a parser: the same handful of leaf elements, and
  * the same reluctance to take on an XML dependency for them. */
@@ -120,8 +137,19 @@ static int rs_sicd_tag_nth(const char *xml, const char *tag, size_t nth, double 
     return 1;
 }
 
-/* Read a SICD product. See readers.h. */
-resonarsat_status_t rs_read_sicd(const char *path, rs_slc_t *img)
+/* Read a SICD product, optionally stopping before the pixels.
+ *
+ * 'meta_only' skips the allocation and the pixel pass, leaving 'img->data' NULL
+ * while every metadata field is filled exactly as a full read would fill it.
+ * The dimensions are still reported, because a caller asking only about
+ * geometry still needs to know how large the image is.
+ *
+ * The split exists because a spotlight SICD runs to tens of thousands of samples
+ * on a side -- 40000 x 40000 is 12.8 GB as complex float -- and answering a
+ * question about the collect's geometry should not cost that. The pixel pass is
+ * the only part that does, so it is the only part guarded. */
+static resonarsat_status_t rs_sicd_read(const char *path, rs_slc_t *img,
+                                        int meta_only)
 {
     if (!path || !img) return RS_ERR_ARG;
     memset(img, 0, sizeof *img);
@@ -228,19 +256,38 @@ resonarsat_status_t rs_read_sicd(const char *path, rs_slc_t *img)
         rs_set_error("sicd: implausible image dimensions %lu x %lu", nrows, ncols);
         goto done;
     }
-    if (pvtype != 'R' || abpp != 32) {
+    /* Two sample layouts, distinguished by what the product declares rather than
+     * by who made it.
+     *
+     * RE32F_IM32F is NITF PVTYPE 'R' at 32 bits and is what ICEYE ships.
+     * RE16I_IM16I is PVTYPE 'SI' at 16 bits and is what Capella ships, so the
+     * entire Capella SICD catalogue was unreadable while only the first was
+     * accepted.
+     *
+     * Keyed on the declared type, never on CollectorName. The container says
+     * which layout it holds and is right about it; a vendor-string test would
+     * be wrong for a new vendor and would go on being wrong silently. That is
+     * the failure mode item 3 of docs/FOLLOW-UPS.md records for the CPHD SGN
+     * override, and it is not worth reproducing here to save one comparison. */
+    size_t bps;                       /* bytes per complex sample */
+    if (pvtype == 'R' && abpp == 32)       bps = 8;
+    else if (pvtype == 'S' && abpp == 16)  bps = 4;
+    else {
         rs_set_error("sicd: pixel type '%c' at %lu bits is not supported; this build "
-                     "reads 32-bit IEEE float I/Q pairs", pvtype, abpp);
+                     "reads 32-bit IEEE float and 16-bit signed integer I/Q pairs",
+                     pvtype, abpp);
         st = RS_ERR_UNSUPPORTED;
         goto done;
     }
-    /* Two bands of four bytes is the only layout consistent with the declared
-     * segment size; checking it catches a compressed or blocked product without
-     * having to interpret the compression fields. */
-    if ((unsigned long long)nrows * ncols * 8ull != (unsigned long long)li) {
+    /* Two bands of the declared width is the only layout consistent with the
+     * declared segment size; checking it catches a compressed or blocked product
+     * without having to interpret the compression fields. */
+    if ((unsigned long long)nrows * ncols * (unsigned long long)bps
+        != (unsigned long long)li) {
         rs_set_error("sicd: %lu x %lu complex samples need %llu bytes, segment holds %lu "
                      "-- the product is probably blocked or compressed",
-                     nrows, ncols, (unsigned long long)nrows * ncols * 8ull, li);
+                     nrows, ncols,
+                     (unsigned long long)nrows * ncols * (unsigned long long)bps, li);
         st = RS_ERR_UNSUPPORTED;
         goto done;
     }
@@ -361,26 +408,39 @@ resonarsat_status_t rs_read_sicd(const char *path, rs_slc_t *img)
     }
 
     /* ---- pixels, transposed on the way in ---- */
-    st = rs_slc_alloc(img, (size_t)ncols, (size_t)nrows);   /* n_az = Col, n_rg = Row */
-    if (st != RS_OK) goto done;
+    if (meta_only) {
+        /* rs_slc_alloc() would have set these. A caller asking about geometry
+         * still needs them -- the memory and grid-width checks are stated in
+         * samples -- so report the dimensions without buying the buffer. */
+        img->n_az = (size_t)ncols;
+        img->n_rg = (size_t)nrows;
+    } else {
+        st = rs_slc_alloc(img, (size_t)ncols, (size_t)nrows); /* n_az = Col, n_rg = Row */
+        if (st != RS_OK) goto done;
 
-    row = malloc((size_t)ncols * 8u);
-    if (!row) { st = RS_ERR_ALLOC; goto fail; }
-    if (fseek(f, (long)hl + (long)lish, SEEK_SET) != 0) {
-        rs_set_error("sicd: cannot seek to the pixel data");
-        st = RS_ERR_IO;
-        goto fail;
-    }
-    for (size_t r = 0; r < (size_t)nrows; r++) {
-        if (fread(row, 8u, (size_t)ncols, f) != (size_t)ncols) {
-            rs_set_error("sicd: %s truncated at range line %zu of %lu", path, r, nrows);
-            st = RS_ERR_FORMAT;
+        row = malloc((size_t)ncols * bps);
+        if (!row) { st = RS_ERR_ALLOC; goto fail; }
+        if (fseek(f, (long)hl + (long)lish, SEEK_SET) != 0) {
+            rs_set_error("sicd: cannot seek to the pixel data");
+            st = RS_ERR_IO;
             goto fail;
         }
-        for (size_t c = 0; c < (size_t)ncols; c++) {
-            const float re = rs_be_float(row + c * 8u, swap);
-            const float im = rs_be_float(row + c * 8u + 4u, swap);
-            img->data[c * (size_t)nrows + r] = re + im * I;   /* [az][rg] */
+        const size_t half = bps / 2u;
+        for (size_t r = 0; r < (size_t)nrows; r++) {
+            if (fread(row, bps, (size_t)ncols, f) != (size_t)ncols) {
+                rs_set_error("sicd: %s truncated at range line %zu of %lu",
+                             path, r, nrows);
+                st = RS_ERR_FORMAT;
+                goto fail;
+            }
+            for (size_t c = 0; c < (size_t)ncols; c++) {
+                const unsigned char *s = row + c * bps;
+                const float re = (bps == 8) ? rs_be_float(s, swap)
+                                            : rs_be_i16(s, swap);
+                const float im = (bps == 8) ? rs_be_float(s + half, swap)
+                                            : rs_be_i16(s + half, swap);
+                img->data[c * (size_t)nrows + r] = re + im * I;   /* [az][rg] */
+            }
         }
     }
 
@@ -433,4 +493,16 @@ done:
     free(xml);
     fclose(f);
     return st;
+}
+
+/* Read a SICD product. See readers.h. */
+resonarsat_status_t rs_read_sicd(const char *path, rs_slc_t *img)
+{
+    return rs_sicd_read(path, img, 0);
+}
+
+/* Read a SICD product's metadata without its pixels. See readers.h. */
+resonarsat_status_t rs_read_sicd_meta(const char *path, rs_slc_t *img)
+{
+    return rs_sicd_read(path, img, 1);
 }

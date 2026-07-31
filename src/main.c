@@ -2951,9 +2951,16 @@ static int rs_cmp_double_asc(const void *a, const void *b)
  * because nothing here reads the signal. */
 static int rs_cmd_validate(int argc, char **argv)
 {
-    const char *in = rs_opt(argc, argv, "--cphd");
-    if (!in) {
+    const char *in       = rs_opt(argc, argv, "--cphd");
+    const char *sicd_in  = rs_opt(argc, argv, "--sicd");
+    if (in && sicd_in) {
+        rs_set_error("validate: give --cphd or --sicd, not both");
+        rs_report_error("validate", RS_ERR_ARG);
+        return 1;
+    }
+    if (!in && !sicd_in) {
         printf("usage: resonarsat validate --cphd FILE [--frequency HZ]\n"
+               "       resonarsat validate --sicd FILE [--frequency HZ]\n"
                "                           [--amplitude MM] [--alpha F]\n"
                "                           [--overlap F] [--upsample N]\n"
                "                           [--cell M] [--size N]\n"
@@ -2962,6 +2969,14 @@ static int rs_cmd_validate(int argc, char **argv)
                "intend, before any of it is processed. Every check is arithmetic\n"
                "on the collect's geometry and costs milliseconds; the read of the\n"
                "file is the only slow part, and it retains one range bin.\n"
+               "\n"
+               "--sicd reads a focused product's metadata only, leaving its\n"
+               "pixels on disk, so screening a 12 GB image costs a header read.\n"
+               "Two checks differ for a focused product and say so: PRF\n"
+               "stability does not apply, because the azimuth axis was\n"
+               "resampled uniformly when the product was made, and --cell\n"
+               "defaults to the product's own azimuth spacing rather than\n"
+               "being yours to choose.\n"
                "\n"
                "--frequency is the vibration you are looking for and is what\n"
                "makes most of the checks answerable. Without it only the\n"
@@ -2974,61 +2989,114 @@ static int rs_cmd_validate(int argc, char **argv)
         return 1;
     }
 
+    const int is_sicd = (sicd_in != NULL);
+    const char *path = is_sicd ? sicd_in : in;
+
     rs_cphd_t c;
-    /* Eight bins rather than one: the reader refuses a window too narrow
-     * to focus, and this command has no use for the samples either way. */
-    const rs_cphd_read_opts_t opts = { .rbin_window = 8 };
-    resonarsat_status_t st = rs_read_cphd(in, &opts, &c);
-    if (st != RS_OK) { rs_report_error("validate", st); return 1; }
+    rs_slc_t img;
+    memset(&c, 0, sizeof c);
+    memset(&img, 0, sizeof img);
+    resonarsat_status_t st;
 
     rs_validate_req_t req;
     rs_validate_req_default(&req);
-    req.dwell_s       = (c.n_pulse > 1) ? c.t[c.n_pulse - 1] - c.t[0] : 0.0;
-    req.prf_hz        = c.prf;
-    req.lambda_m      = c.lambda;
-    req.n_pulse       = c.n_pulse;
-    /* The read above retains a narrow window, so the collect's own range-bin
-     * count is not in 'c'. Report the memory a real read would cost at the
-     * --rbins the caller intends to use. */
-    req.n_rbin        = (size_t)rs_opt_double(argc, argv, "--rbins", 4096.0);
 
-    /* Slant range, platform speed and incidence measured from the recorded
-     * positions rather than assumed, matching what rs_focus_backproject()
-     * derives for the image it produces. */
-    if (c.n_pulse > 1) {
-        const double *p0 = &c.pos[0];
-        const double r0 = sqrt(p0[0]*p0[0] + p0[1]*p0[1] + p0[2]*p0[2]);
-        req.slant_range_m = (c.r_ref && c.r_ref[0] > 0.0) ? c.r_ref[0] : r0;
-        double d[3];
-        for (int k = 0; k < 3; k++) d[k] = c.pos[3*(c.n_pulse-1)+k] - c.pos[k];
-        req.v_platform_ms = sqrt(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]) / req.dwell_s;
-        const double h = fabs(p0[2]);
-        req.incidence_rad = (req.slant_range_m > 0.0)
-                          ? acos(fmin(1.0, h / req.slant_range_m)) : 0.0;
-    }
+    if (is_sicd) {
+        /* Metadata only. The pixels answer no question this command asks, and a
+         * spotlight SICD carries enough of them to make reading them the whole
+         * cost of the run. */
+        st = rs_read_sicd_meta(sicd_in, &img);
+        if (st != RS_OK) { rs_report_error("validate", st); return 1; }
 
-    /* Timing, measured. The annotated PRF is one number; the real thing is not.
-     *
-     * The spread is taken from the 1st and 99th percentiles rather than the
-     * extremes, because a single dropped vector leaves one interval of nine
-     * ordinary ones and would otherwise be reported as an 89% PRF excursion.
-     * The gap is what that interval actually is, and it is reported separately
-     * as itself. */
-    if (c.n_pulse > 2) {
-        const size_t m = c.n_pulse - 1;
-        double *pri = malloc(m * sizeof *pri);
-        if (pri) {
-            double worst = 0.0;
-            for (size_t i = 0; i < m; i++) {
-                pri[i] = c.t[i+1] - c.t[i];
-                if (pri[i] > worst) worst = pri[i];
+        req.dwell_s  = img.t_dwell;
+        /* fs_az, never pulse_prf. The two differ by the sub-swath count on some
+         * products, and slc.h exists because substituting one for the other
+         * scales every Doppler axis while still landing on plausible numbers.
+         * A focused product records no transmit PRF at all, so pulse_prf is
+         * zero here by construction. */
+        req.prf_hz   = img.fs_az;
+        req.lambda_m = img.lambda;
+        req.n_pulse  = img.n_az;
+        req.n_rbin   = img.n_rg;
+
+        /* Taken as-is, and deliberately not re-centred.
+         *
+         * slc.h documents r0 as the slant range of the FIRST range sample, but
+         * the SICD reader fills it from SCPCOA/SlantRange, which is the range to
+         * the scene centre point. An earlier version of this code added half a
+         * swath to reach the scene centre and so double-counted it by tens of
+         * metres. The field's meaning differing by reader is a real defect and
+         * is recorded in docs/FOLLOW-UPS.md; papering over it here would hide it
+         * behind a command that looks correct. */
+        req.slant_range_m = img.r0;
+        req.v_platform_ms = img.v_platform;
+        req.incidence_rad = img.incidence;
+
+        /* prf_min_hz and prf_max_hz stay zero, which omits the PRF-stability
+         * check rather than passing it. A focused product's azimuth axis was
+         * resampled onto a uniform grid when it was made, so there is no
+         * instantaneous PRF left to be unstable -- and reporting a 0.00% spread
+         * would be a fabricated pass, which is the failure mode this whole
+         * command exists to prevent. rs_cmd_validate() says so in its output. */
+
+        /* The cell is the product's, not the caller's. Backprojection lets a
+         * caller choose a grid; a focused image arrives on its own. */
+        if (img.az_spacing_m > 0.0) req.cell_m = img.az_spacing_m;
+    } else {
+        /* Eight bins rather than one: the reader refuses a window too narrow
+         * to focus, and this command has no use for the samples either way. */
+        const rs_cphd_read_opts_t opts = { .rbin_window = 8 };
+        st = rs_read_cphd(in, &opts, &c);
+        if (st != RS_OK) { rs_report_error("validate", st); return 1; }
+
+        req.dwell_s       = (c.n_pulse > 1) ? c.t[c.n_pulse - 1] - c.t[0] : 0.0;
+        req.prf_hz        = c.prf;
+        req.lambda_m      = c.lambda;
+        req.n_pulse       = c.n_pulse;
+        /* The read above retains a narrow window, so the collect's own range-bin
+         * count is not in 'c'. Report the memory a real read would cost at the
+         * --rbins the caller intends to use. */
+        req.n_rbin        = (size_t)rs_opt_double(argc, argv, "--rbins", 4096.0);
+
+        /* Slant range, platform speed and incidence measured from the recorded
+         * positions rather than assumed, matching what rs_focus_backproject()
+         * derives for the image it produces. */
+        if (c.n_pulse > 1) {
+            const double *p0 = &c.pos[0];
+            const double r0 = sqrt(p0[0]*p0[0] + p0[1]*p0[1] + p0[2]*p0[2]);
+            req.slant_range_m = (c.r_ref && c.r_ref[0] > 0.0) ? c.r_ref[0] : r0;
+            double d[3];
+            for (int k = 0; k < 3; k++) d[k] = c.pos[3*(c.n_pulse-1)+k] - c.pos[k];
+            req.v_platform_ms = sqrt(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]) / req.dwell_s;
+            const double h = fabs(p0[2]);
+            req.incidence_rad = (req.slant_range_m > 0.0)
+                              ? acos(fmin(1.0, h / req.slant_range_m)) : 0.0;
+        }
+
+        /* Timing, measured. The annotated PRF is one number; the real thing is
+         * not.
+         *
+         * The spread is taken from the 1st and 99th percentiles rather than the
+         * extremes, because a single dropped vector leaves one interval of nine
+         * ordinary ones and would otherwise be reported as an 89% PRF excursion.
+         * The gap is what that interval actually is, and it is reported
+         * separately as itself. */
+        if (c.n_pulse > 2) {
+            const size_t m = c.n_pulse - 1;
+            double *pri = malloc(m * sizeof *pri);
+            if (pri) {
+                double worst = 0.0;
+                for (size_t i = 0; i < m; i++) {
+                    pri[i] = c.t[i+1] - c.t[i];
+                    if (pri[i] > worst) worst = pri[i];
+                }
+                qsort(pri, m, sizeof *pri, rs_cmp_double_asc);
+                const double p01 = pri[m / 100], p99 = pri[(m * 99) / 100];
+                req.prf_min_hz = (p99 > 0.0) ? 1.0 / p99 : 0.0;
+                req.prf_max_hz = (p01 > 0.0) ? 1.0 / p01 : 0.0;
+                req.worst_gap_s = worst;
+                free(pri);
             }
-            qsort(pri, m, sizeof *pri, rs_cmp_double_asc);
-            const double p01 = pri[m / 100], p99 = pri[(m * 99) / 100];
-            req.prf_min_hz = (p99 > 0.0) ? 1.0 / p99 : 0.0;
-            req.prf_max_hz = (p01 > 0.0) ? 1.0 / p01 : 0.0;
-            req.worst_gap_s = worst;
-            free(pri);
         }
     }
 
@@ -3044,7 +3112,16 @@ static int rs_cmd_validate(int argc, char **argv)
     size_t nf = 0;
     const rs_validate_level_t worst = rs_validate(&req, f, &nf);
 
-    printf("\nvalidating %s\n", in);
+    printf("\nvalidating %s\n", path);
+    if (is_sicd) {
+        const int cell_given = (rs_opt(argc, argv, "--cell") != NULL);
+        printf("  focused product: %zu x %zu samples, cell %.4f m %s\n",
+               img.n_az, img.n_rg, req.cell_m,
+               cell_given ? "as given, overriding the product's own spacing"
+                          : "from the product's own azimuth spacing");
+        printf("  PRF stability is not checked -- a focused azimuth axis was "
+               "resampled uniformly, so it cannot be unstable\n");
+    }
     if (req.target_freq_hz > 0.0) {
         printf("  against a %.3f Hz target", req.target_freq_hz);
         if (req.target_amp_m > 0.0) printf(" of %.2f mm", 1000.0 * req.target_amp_m);
@@ -3064,7 +3141,7 @@ static int rs_cmd_validate(int argc, char **argv)
                "  result; that is the failure mode this command exists for.\n");
     }
 
-    rs_cphd_free(&c);
+    if (is_sicd) rs_slc_free(&img); else rs_cphd_free(&c);
     return (worst == RS_V_FAIL) ? 2 : 0;
 }
 

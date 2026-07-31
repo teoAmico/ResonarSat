@@ -181,9 +181,23 @@ across 339 unique sites**, including 60 s scenes over Istanbul and Valencia and
 splitting rather than the pulse route -- `rs_subaperture_split()`, which
 `subaperture.h` notes is the route the published method actually describes.
 
-**But `--sicd` is accepted only by `resonarsat info`.** `focus`, `mmotion`,
-`tomo`, `sweep` and `validate` all read `--cphd` and nothing else, so none of
-those 633 collects can currently be measured. `rs_read_sicd()` exists and
+**The two vendors ship different pixel types, and both now read.** Capella
+declares `RE16I_IM16I` (16-bit signed integer I/Q) and ICEYE `RE32F_IM32F`
+(32-bit IEEE float). `readers/sicd.c` originally accepted only the float layout,
+which made the entire Capella SICD catalogue unreadable -- found on 2026-07-31 by
+running `validate --sicd` against
+`CAPELLA_C13_SP_SICD_HH_20241123062737_20241123062813` and getting
+`RS_ERR_UNSUPPORTED`. Both layouts are now decoded, keyed on the type the
+container declares and never on the vendor name. Umbra's SICD pixel type has not
+been checked.
+
+The 16-bit samples are carried through unscaled: SICD supplies no scale factor
+for that pixel type, and every quantity this project reports -- frequency,
+displacement, correlation -- is invariant to a constant scaling of the image.
+
+**`--sicd` reaches only `info` and `validate`.** `focus`, `mmotion`, `tomo` and
+`sweep` all read `--cphd` and nothing else, so a readable SICD still cannot be
+measured. `rs_read_sicd()` exists and
 `rs_subaperture_split()` takes an `rs_slc_t`, so the gap is CLI wiring rather
 than missing science. Closing it widens the usable archive considerably and cuts
 per-collect download sizes by an order of magnitude. It also gives up the pulse
@@ -987,3 +1001,38 @@ ESA publishes sample products suitable for inspecting the mission formats:
 
 - First generation: https://earth.esa.int/eogateway/missions/cosmo-skymed/sample-data
 - Second generation: https://earth.esa.int/eogateway/missions/cosmo-skymed-second-generation/sample-data
+
+## Screening a multi-gigabyte SICD without downloading it
+
+`validate --sicd` reads metadata and never touches pixels, and a NITF puts
+everything it needs at the two ends of the file: the main header and image
+subheader at the front, and the SICD XML in a DES **after** the pixel segment.
+Both can be fetched by HTTP range request, dropped into a sparse file of the
+right apparent size, and validated locally.
+
+Measured on `ICEYE_X49_SICD_SLEDF_9307864_20260317T141841.nitf`, a 9,432,573,281
+byte product:
+
+```
+downloaded   9,953 bytes   (929 front + 9,024 tail)
+on disk         28 KB      (sparse; the pixel span is a hole)
+validate        ~4 ms
+```
+
+The recipe, given a URL:
+
+1. Range-read the first 1 KB. NITF 2.1 lays out `FL` (12 digits), `HL` (6),
+   `NUMI` (3), `LISH` (6), `LI` (10) consecutively, so the DES begins at
+   `HL + LISH + LI` and the tail runs to `FL`.
+2. Range-read `0 .. HL+LISH-1` and `HL+LISH+LI .. FL-1`.
+3. Create a file of apparent length `FL` and write the two pieces at their true
+   offsets. The pixel span stays a hole.
+4. Run `resonarsat validate --sicd` on it.
+
+The reader seeks past the image segment to reach the XML and reads no sample, so
+the hole is never touched. **Do not pass such a file to anything that processes
+pixels** -- it will read zeros without complaint.
+
+The same two-ended trick does not apply to CPHD, which is easier: its XML sits
+at a fixed early offset given in an ASCII header, so one range request of about
+12 KB suffices.
