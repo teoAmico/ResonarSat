@@ -146,6 +146,8 @@ int main(void)
                "injected", "matched prom", "floor", "clears?", "TOOL reports");
 
         size_t n_clear = 0, n_correct = 0;
+        double reported[sizeof freqs / sizeof freqs[0]];
+        double last_df = 0.0;
         for (size_t i = 0; i < n_freq; i++) {
             const rs_sim_tgt_t vib[] = {
                 { .x = 0.0, .y = 0.0, .z = 0.0, .rcs = 1.0,
@@ -155,6 +157,8 @@ int main(void)
             RS_CHECK_OK(analyse(vib, 1, NULL, &tp, freqs[i], NULL, 0.0, NULL,
                                 &peak_f, &df));
 
+            reported[i] = peak_f;
+            last_df = df;
             const int clears = tp > floor_prom;
             const int correct = fabs(peak_f - freqs[i]) < 2.0 * df;
             if (clears) n_clear++;
@@ -168,7 +172,7 @@ int main(void)
         printf("    %zu of %zu are the frequency the TOOL would report\n",
                n_correct, n_freq);
 
-        /* TWO CRITERIA, AND ONLY THE SECOND IS ABOUT THE MEASUREMENT.
+        /* THREE CRITERIA, AND ONLY THE THIRD IS HARD TO PASS BY ACCIDENT.
          *
          * The first asks whether SOME window reports approximately the injected
          * frequency with more prominence than a static scene manages anywhere.
@@ -185,15 +189,46 @@ int main(void)
          *
          * The second asks what mmotion would PRINT: the dominant frequency of
          * the most prominent window, which is what rs_spectrum_best_window()
-         * selects and what a user reads off. That number cannot be produced by
-         * a lucky window elsewhere in the scene, because it is a single value
-         * per run rather than a search over candidates.
+         * selects and what a user reads off. That cannot be produced by a lucky
+         * window elsewhere in the scene, being one value per run.
          *
-         * Both are asserted. The first is kept because it is the historical
-         * measure and a regression in it still matters; the second is the one
-         * that means the chain recovered the vibration. */
+         * BUT THE SECOND IS STILL A PER-POINT MATCH, and that is not enough. A
+         * chain that emits a FIXED spurious frequency passes it at every
+         * injected frequency the fixed value happens to sit near, which at this
+         * bin spacing is a wide range. Four conclusions were drawn and withdrawn
+         * on 2026-07-31 for exactly that reason -- among them a configuration
+         * reporting 1.569 Hz for every injection from 0.2 to 1.4 Hz, and one
+         * reporting 0.314 Hz for six of seven, both scoring "recovered" wherever
+         * the artefact fell within tolerance.
+         *
+         * The third fixes it. Sweeping the injection and fitting the reported
+         * frequency against it separates a chain that follows the target from
+         * one that does not: a working chain gives slope 1, a fixed artefact
+         * gives slope 0, and no single point can tell them apart. The rms bound
+         * is half a bin -- four times tighter than the per-point tolerance --
+         * because a chain that genuinely tracks has no reason to be looser. */
+        double slope = 0.0, rms = 0.0;
+        RS_CHECK(rs_track_fit(freqs, reported, n_freq, &slope, &rms) == 1);
+        printf("    tracking: slope %.3f (want 1), rms %.4f Hz (want < %.4f)\n",
+               slope, rms, 0.5 * last_df);
+
         RS_CHECK(n_clear >= 3);
         RS_CHECK(n_correct >= 3);
+        RS_CHECK_NEAR(slope, 1.0, 0.15);
+        RS_CHECK(rms < 0.5 * last_df);
+
+        /* The criterion has to be able to FAIL, or asserting it means nothing.
+         * A chain reporting one fixed frequency regardless of the injection --
+         * the exact defect this exists to catch -- must be rejected. */
+        {
+            const double fixed[] = { 1.569, 1.569, 1.569, 1.569 };
+            double fs = 0.0, fr = 0.0;
+            RS_CHECK(rs_track_fit(freqs, fixed, n_freq, &fs, &fr) == 1);
+            RS_CHECK(fabs(fs - 1.0) > 0.15);      /* slope 0, not 1 */
+            RS_CHECK(fr >= 0.5 * last_df);        /* and nowhere near */
+            printf("    negative control: a fixed 1.569 Hz gives slope %.3f, "
+                   "rms %.4f Hz -- rejected\n", fs, fr);
+        }
     }
 
     RS_TEST_END();

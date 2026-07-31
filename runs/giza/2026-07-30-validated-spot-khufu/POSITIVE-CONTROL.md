@@ -642,3 +642,42 @@ and by a mechanism none of the three floor models describes.
 
 The designed experiment therefore needs four factors, not three: cell,
 sub-look resolution, pixel window size, and overlap.
+
+---
+
+# The criterion that would have caught all of it
+
+Every withdrawal in this file came from the same mistake: judging recovery by
+`|reported - injected| < 2 bins` at ONE frequency. A chain emitting a fixed
+spurious frequency passes that wherever the fixed value happens to fall near
+the injection, which at these bin spacings is a wide range. The four cases:
+
+| configuration | reports | scored "recovered" at |
+|---|---|---|
+| uniform 159 / 0.88 | 1.569 Hz for 0.2-1.4 Hz injected | wherever tolerance reached |
+| pulse 159 / 0.88 | 0.314 Hz for six of seven | 0.3 and 0.4 Hz |
+| pulse 128 / 0 | 0.302 Hz below the floor | 0.3 Hz |
+| uniform 159 / 0.88 in band | bins 2-4 for bins 3-8 | 0.15 Hz |
+
+None is a detection. All four passed the per-point test.
+
+`rs_track_fit()` in `tests/rs_test.h` replaces it. Sweep the injected frequency,
+fit the reported against it, and check two numbers:
+
+- **slope** -- 1 for a chain that follows the target, 0 for a fixed artefact.
+  No single point can distinguish these, which is the whole problem.
+- **rms** of `reported - injected`, bounded at half a bin. Four times tighter
+  than the per-point tolerance, because a chain that genuinely tracks has no
+  reason to be looser.
+
+Both are asserted in `tests/test_nullmotion.c`, alongside a **negative control**
+that feeds the criterion a constant 1.569 Hz and requires it to fail -- so the
+criterion cannot quietly stop discriminating.
+
+At the working operating point: slope 1.008, rms 0.0052 Hz against a 0.0252 Hz
+bound, so it passes with five times the required margin. The fixed 1.569 Hz
+series gives slope 0.000 and rms 0.9945 Hz.
+
+**Every result in this file that was later withdrawn fails the new criterion,
+and the one operating point that survives passes it comfortably.** Future
+sweeps should report slope and rms rather than a count of per-point matches.

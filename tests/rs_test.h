@@ -71,6 +71,53 @@ static const char *rs_test_current = "";
 } while (0)
 
 /* Report the tally and produce the process exit code. */
+/* Does a reported frequency TRACK an injected one, or is it fixed?
+ *
+ * WHY THIS EXISTS. The obvious criterion -- |reported - injected| < 2 bins at
+ * one frequency -- is far too loose, and this project has drawn four wrong
+ * conclusions from it in a single day. A tracker that emits a FIXED spurious
+ * frequency passes it whenever that fixed value happens to fall near the
+ * injected one, which at coarse bin spacing is often. Every one of those wrong
+ * conclusions came from a single-point match; every one would have been caught
+ * by sweeping the injected frequency and asking whether the answer moved.
+ * See runs/giza/2026-07-30-validated-spot-khufu/POSITIVE-CONTROL.md.
+ *
+ * Two numbers are returned and both must be checked:
+ *
+ *   slope   least squares of reported against injected. A working chain gives
+ *           1; a fixed artefact gives 0. This is the part a single point
+ *           cannot test at all.
+ *   rms     root mean square of (reported - injected), in Hz. Tightness. Half
+ *           a bin is a reasonable bound and is what the working operating
+ *           point achieves with room to spare.
+ *
+ * Neither alone is sufficient. Slope 1 with a large offset still tracks but is
+ * biased; a small rms with slope 0 means the sweep was too narrow to tell.
+ * Returns 0 and leaves the outputs at 0 when n < 3, since two points always
+ * fit a line exactly and can never fail this. */
+static inline int rs_track_fit(const double *injected, const double *reported,
+                        size_t n, double *slope_out, double *rms_out)
+{
+    if (slope_out) *slope_out = 0.0;
+    if (rms_out)   *rms_out = 0.0;
+    if (!injected || !reported || n < 3) return 0;
+
+    double mx = 0.0, my = 0.0;
+    for (size_t i = 0; i < n; i++) { mx += injected[i]; my += reported[i]; }
+    mx /= (double)n; my /= (double)n;
+
+    double sxy = 0.0, sxx = 0.0, sq = 0.0;
+    for (size_t i = 0; i < n; i++) {
+        sxy += (injected[i] - mx) * (reported[i] - my);
+        sxx += (injected[i] - mx) * (injected[i] - mx);
+        const double r = reported[i] - injected[i];
+        sq += r * r;
+    }
+    if (slope_out) *slope_out = (sxx > 0.0) ? sxy / sxx : 0.0;
+    if (rms_out)   *rms_out = sqrt(sq / (double)n);
+    return 1;
+}
+
 #define RS_TEST_END() do { \
     if (rs_test_failures) { \
         printf("%d failure(s)\n", rs_test_failures); \
