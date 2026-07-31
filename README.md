@@ -87,14 +87,16 @@ The micro-motion half of this technique — measuring vibration of the ground an
 structures from a single satellite pass — is established work, validated by independent
 groups against accelerometers placed on the targets themselves; the references at the end
 give that literature. This implementation has not reproduced it, and nothing here should be
-read as a demonstrated sensitivity. Every measurement from the patent's own chain has failed
-its null test outright. The validated chain (`--subap uniform --estimator phase`) instead
-*passes* the shuffle test at Giza, at p = 0.03 — and then reports the same frequency, within
-1% of the same prominence, that the identical processing produces from a simulated world
-containing no motion. **Do not trust `--shuffle-looks` on a phase observable**: destroying
-the time order inflates the per-step phase noise 36-fold, so a drifting series beats the
-roughened version of itself. Run `--null-static`, which a motionless scene cannot walk over.
-See [`runs/giza/2026-07-30-uniform-phase-khufu/`](runs/giza/2026-07-30-uniform-phase-khufu/RUN.md).
+read as a demonstrated sensitivity. Measurements from the patent's own chain fail their null
+test outright.
+
+**Do not trust `--shuffle-looks` on a phase observable.** Destroying the sub-look time order
+inflates the per-step phase noise 36-fold, so a drifting series beats the roughened version of
+itself: at Giza a phase measurement clears the shuffle test at p = 0.03 and then reports the
+same frequency, within 1% of the same prominence, that the identical processing produces from
+a simulated world containing no motion. Use `--null-static`, which a motionless scene cannot
+walk over. The measurement is in
+[`runs/giza/2026-07-30-uniform-phase-khufu/`](runs/giza/2026-07-30-uniform-phase-khufu/RUN.md).
 
 **Two different limits are easy to confuse.** The step between sub-apertures sets how finely
 in time the ground is sampled, and so the highest frequency representable at all; each
@@ -146,7 +148,7 @@ geometry. Three specifics bound how much any tomogram from this tool is worth:
 - **The published sources disagree by a factor of two.** The paper's arithmetic uses one
   acoustic-wavelength convention and the patent uses the other, which scales every depth by
   2×. ResonarSat exposes the choice explicitly rather than silently picking one.
-- **The tomographic baseline is along-track — and we have now measured what that costs.**
+- **The tomographic baseline is along-track.**
   It is built from sub-aperture phase-centre separations along the orbit, not an elevation
   baseline. ResonarSat reproduces this faithfully and provides classic multi-baseline
   tomography as an uncontested reference. Whether that geometry carries depth information is
