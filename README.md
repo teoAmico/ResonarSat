@@ -101,14 +101,17 @@ walk over. The measurement is in
 **Two different limits are easy to confuse.** The step between sub-apertures sets how finely
 in time the ground is sampled, and so the highest frequency representable at all; each
 sub-aperture's own length sets how strongly a frequency survives. Overlapping separates the
-two. But the sub-aperture length has an upper bound as well. Once the observation ratio
-`f · t_sap` passes 1, the sub-look *resolves* the target's own micro-Doppler paired echoes and
-the tracker follows a train rather than a point. The echoes are real and sit where the theory
-puts them — `tests/test_pairedecho.c` finds them at the predicted offsets and amplitudes — and
-since the ratio is `f · α · dwell`, **a long dwell is a liability here, not an asset.** Where
-it becomes fatal in practice is not measured: an attempt to bracket it failed because the
-observation ratio, the injected displacement and the modulation index cannot be varied
-independently. `resonarsat validate` reports the ratio as a warning, not a refusal.
+two. But the sub-aperture length has an upper bound as well, and it is the one that bites. The
+tracked azimuth excursion is squeezed from both sides: it must stay inside about three quarters
+of a **sub-look** resolution cell or the correlation argmax wraps, and it must exceed roughly
+7 px peak-to-peak or the tracker reports a fixed spurious frequency of its own instead. Since a
+longer sub-aperture sharpens the sub-look and so lowers the ceiling, **a long dwell is a
+liability here, not an asset** — and when the ceiling falls below the floor, *no* target
+amplitude works at any frequency. That is what the 32.9 s Giza collect does at the aperture
+fraction the published campaigns use, which is the real reason the Khufu runs measured nothing.
+Those campaigns run on far shorter dwells, so what transfers between collects is `t_sap` in
+seconds, not α as a fraction of dwell. `resonarsat validate` computes both bounds for a given
+collect and target before anything is processed.
 
 
 Three limits worth knowing before choosing a target:

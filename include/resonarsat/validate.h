@@ -55,6 +55,7 @@ typedef enum {
     RS_VALIDATE_GRID,             /* n_az >= 2*n_looks for the spectral route */
     RS_VALIDATE_PRF_STABILITY,    /* measured from the file's own pulse times */
     RS_VALIDATE_SENSITIVITY,      /* smallest displacement above the floor */
+    RS_VALIDATE_AMBIGUITY,        /* is there any amplitude the tracker can see */
     RS_VALIDATE_MEMORY,           /* what a read of this collect will cost */
     RS_VALIDATE_GROUND_TRUTH,     /* always unknown; see the header */
     RS_VALIDATE_N_CHECKS

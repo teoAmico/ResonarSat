@@ -338,3 +338,75 @@ the scene, at prominence exceeding anything the real signal produces. Separating
 `eta` from displacement needs a target-independent handle -- varying `t_sap` at
 fixed `f` and `A`, which moves `eta` alone -- but that is not worth running until
 the artefact is understood, because it is what both routes are reporting.
+
+---
+
+# 2026-07-31, continued: what the controlling variable actually is
+
+The withdrawal above left the artefact as the thing to chase. Chasing it found
+the constraint that governs the whole chain, and it is not `eta`.
+
+## The artefact is a saturating argmax
+
+The static-scene shift series is a sawtooth pinned to the edges of the search
+extent -- `+-15.6 px` against a `--win 32` half-width of 16 -- clean for the
+first ten looks and wrapping thereafter. The reported "frequency" is the wrap
+rate. Nothing about the scene enters it, which is why it is fixed.
+
+## Two bounds, and they can cross
+
+- **Ceiling.** `rs_microm_recommend_looks()` already requires the peak shift to
+  stay inside three quarters of a **sub-look** resolution cell. Driving a target
+  up through it at 0.5 Hz: 1x and 2x recover, 4x reports **1.512 Hz -- exactly
+  three times the true 0.504** -- and 16x collapses to the lowest bin. A wrapping
+  sawtooth generating odd harmonics is the expected signature. Not monotone, so
+  the ceiling is a boundary of reliability rather than a cliff.
+- **Floor.** Below roughly 7 px peak-to-peak the artefact wins.
+
+Sub-look resolution is `lambda*R/(2*v_p*t_sap)`, so a **short** sub-aperture
+raises the ceiling. Overlap shortens nothing -- it widens each look's band and
+therefore *lowers* it. For the three configurations run:
+
+| configuration | sub-look res | ceiling | floor | window |
+|---|---|---|---|---|
+| pulse N=128 ov=0 | 8.13 m | 30.5 px | 7 px | 7-30.5 px |
+| pulse N=159 ov=0.88 | 1.27 m | 4.8 px | 7 px | **none** |
+| uniform N=159 ov=0.88 | 1.27 m | 4.8 px | 7 px | **none** |
+
+This predicts **every row of both ladders above**: the 128/0 recoveries sat at
+7.3, 10.5 and 14.7 px and its misses at 2.1, 3.1 and 5.2 px.
+
+## Verified in both directions
+
+**Fixed displacement, sweeping frequency.** Scaling amplitude as `1/f` holds the
+excursion constant while `eta` varies 14-fold:
+
+| f (Hz) | 0.1 | 0.2 | 0.3 | 0.5 | 0.7 | 1.0 | 1.4 |
+|---|---|---|---|---|---|---|---|
+| eta | 0.016 | 0.031 | 0.047 | 0.078 | 0.109 | 0.156 | 0.219 |
+| reported | 0.101 | 0.202 | 0.302 | 0.504 | 0.706 | 1.008 | 1.411 |
+
+**7 of 7**, including four frequencies that missed at fixed amplitude. Across
+this range the controlling variable is displacement, not `eta`.
+
+**The crossed window really is empty.** Four targets placed *under* the
+0.88 configuration's 4.8 px ceiling -- 1, 2, 3 and 4 px p2p -- all miss and all
+report 1.569 Hz. Prominence falls monotonically (26.2, 22.1, 18.1, 12.6) as the
+real signal grows without ever displacing the artefact. Its floor is above its
+ceiling, so nothing can be measured with it at any amplitude or frequency.
+
+## Two consequences worth stating separately
+
+**The aperture fraction does not transfer.** Giza at alpha 5% over a 32.9 s
+dwell gives `t_sap` 1.64 s, a 1.03 m sub-look and a 1.5 px ceiling -- unusable
+at every frequency. Opening a window needs alpha near 0.8%, far below the
+4.5-7.6% the published campaigns validate. Those campaigns collect much shorter
+dwells, so **`t_sap` in seconds is the transferable quantity, not alpha.** The
+validator now reports both and lets them disagree.
+
+**The sensitivity figure was optimistic by a factor of 57.** The old check
+reported `2.449/upsample` px -- the sub-pixel *interpolation* limit -- as the
+detection floor. The measured floor is 7 px p2p. At 0.1 Hz on Giza that moves
+the smallest visible vertical amplitude from 1.2 mm to **68.7 mm**, and even a
+short sub-aperture only gives an admissible band of 69-95 mm. Seven centimetres.
+Both numbers are now printed, with the interpolation limit labelled as such.

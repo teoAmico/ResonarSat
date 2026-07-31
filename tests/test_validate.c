@@ -75,13 +75,17 @@ int main(void)
     }
 
     /* ------------------------------------------------------------------
-     * The same collect asked for a frequency it can actually reach.
+     * Lowering the frequency does NOT rescue that configuration, and this is
+     * the case that says so. The wrap ceiling is set by the sub-look
+     * resolution and the cell -- neither of which depends on the target -- so
+     * at alpha 5% over a 32.9 s dwell the Giza collect has no admissible
+     * amplitude at ANY frequency. What has to change is the sub-aperture.
      * ------------------------------------------------------------------ */
-    RS_CASE("a frequency inside the reachable band passes");
+    RS_CASE("a lower frequency does not rescue an unusable sub-aperture");
     {
         rs_validate_req_t r;
         giza(&r);
-        r.target_freq_hz = 0.10;   /* below the 0.122 Hz eta limit at alpha 5% */
+        r.target_freq_hz = 0.10;
         r.target_amp_m = 0.005;
         r.alpha = 0.05;
         r.overlap = 0.88;
@@ -89,12 +93,37 @@ int main(void)
         r.cell_m = 1.0;
         r.grid_n = 512;
 
-        const rs_validate_level_t worst = rs_validate(&r, f, &n);
+        rs_validate(&r, f, &n);
         const rs_validate_finding_t *eta = find(f, n, RS_VALIDATE_OBSERVATION_RATIO);
-        RS_CHECK(eta != NULL && eta->level == RS_V_PASS);
-        /* UNKNOWN from ground truth is not a failure; FAIL would be. */
-        RS_CHECK(worst != RS_V_FAIL);
-        printf("    eta check: %s\n", eta ? eta->detail : "(missing)");
+        const rs_validate_finding_t *a = find(f, n, RS_VALIDATE_AMBIGUITY);
+        RS_CHECK(eta != NULL && eta->level == RS_V_PASS);   /* eta is fine here */
+        RS_CHECK(a != NULL && a->level == RS_V_FAIL);       /* and it does not matter */
+    }
+
+    /* Shortening the sub-aperture is what fixes it -- and doing so leaves the
+     * aperture fraction BELOW the range the published campaigns validated.
+     * Those campaigns run on far shorter dwells, so what transfers between
+     * collects is t_sap in seconds, not alpha as a fraction. The two checks
+     * disagree here on purpose; the tool reports both. */
+    RS_CASE("a short sub-aperture opens a window, against the alpha rule");
+    {
+        rs_validate_req_t r;
+        giza(&r);
+        r.target_freq_hz = 0.10;
+        r.target_amp_m = 0.0;
+        r.alpha = 0.008;           /* t_sap 0.26 s, well under the 4.5% floor */
+        r.overlap = 0.0;
+        r.upsample = 40;
+        r.cell_m = 1.0;
+        r.grid_n = 512;
+
+        rs_validate(&r, f, &n);
+        const rs_validate_finding_t *a = find(f, n, RS_VALIDATE_AMBIGUITY);
+        const rs_validate_finding_t *al = find(f, n, RS_VALIDATE_APERTURE_FRACTION);
+        RS_CHECK(a != NULL && a->level == RS_V_PASS);
+        RS_CHECK(al != NULL && al->level != RS_V_PASS);
+        printf("    ambiguity: %s\n", a->detail);
+        printf("    alpha:     %s\n", al->detail);
     }
 
     /* ------------------------------------------------------------------
@@ -122,6 +151,64 @@ int main(void)
         const rs_validate_finding_t *nul = find(f, n, RS_VALIDATE_AVERAGING_NULL);
         RS_CHECK(nul != NULL && nul->level == RS_V_FAIL);
         printf("    null check: %s\n", nul ? nul->detail : "(missing)");
+    }
+
+    /* ------------------------------------------------------------------
+     * The two-sided excursion window, which is what actually disqualifies the
+     * Khufu configuration. Both bounds were measured; see RS_VALIDATE_AMBIGUITY.
+     * ------------------------------------------------------------------ */
+    RS_CASE("a configuration with no admissible amplitude is refused");
+    {
+        rs_validate_req_t r;
+        giza(&r);
+        r.target_freq_hz = 2.0;
+        r.target_amp_m = 0.001;
+        r.alpha = 0.05;            /* t_sap 1.64 s -> sub-look resolution 1.03 m */
+        r.overlap = 0.88;
+        r.upsample = 40;
+        r.cell_m = 1.0;
+        r.grid_n = 512;
+
+        const rs_validate_level_t worst = rs_validate(&r, f, &n);
+        const rs_validate_finding_t *a = find(f, n, RS_VALIDATE_AMBIGUITY);
+        RS_CHECK(a != NULL && a->level == RS_V_FAIL);
+        RS_CHECK(worst == RS_V_FAIL);
+        RS_CHECK(strstr(a->detail, "BELOW the floor") != NULL);
+        printf("    %s\n", a->detail);
+    }
+
+    /* The shape that recovers an injected frequency 7 times out of 7, as the
+     * fixed-displacement sweep in POSITIVE-CONTROL.md found: the simulator
+     * geometry, pulse route, 128 looks, zero overlap. */
+    RS_CASE("the operating point that works has a usable window");
+    {
+        rs_validate_req_t r;
+        rs_validate_req_default(&r);
+        r.dwell_s = 20.0;
+        r.lambda_m = 0.031228;
+        r.slant_range_m = 610328.0;
+        r.v_platform_ms = 7500.0;
+        r.incidence_rad = 34.99 * M_PI / 180.0;
+        r.n_pulse = 8000;
+        r.alpha = 1.0 / 128.0;     /* 128 looks, zero overlap */
+        r.overlap = 0.0;
+        r.target_freq_hz = 0.5;
+        r.target_amp_m = 0.00955;  /* the amplitude that recovered 0.504 Hz */
+        r.cell_m = 0.4;
+        r.upsample = 10;
+        r.grid_n = 320;
+
+        rs_validate(&r, f, &n);
+        const rs_validate_finding_t *a = find(f, n, RS_VALIDATE_AMBIGUITY);
+        RS_CHECK(a != NULL && a->level == RS_V_PASS);
+        printf("    %s\n", a->detail);
+
+        /* And the amplitude that wrapped into the third harmonic is refused. */
+        r.target_amp_m = 0.0382;   /* 4x, which reported 1.512 for 0.504 Hz */
+        rs_validate(&r, f, &n);
+        a = find(f, n, RS_VALIDATE_AMBIGUITY);
+        RS_CHECK(a != NULL && a->level == RS_V_FAIL);
+        RS_CHECK(strstr(a->detail, "would wrap") != NULL);
     }
 
     /* ------------------------------------------------------------------

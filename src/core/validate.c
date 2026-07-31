@@ -41,6 +41,13 @@
 /* The aperture fraction range the published validation works at, from Lotti et
  * al. (SHMII-13), whose three tests sit at 7.6%, 4.5% and 4.5%. Below it their
  * text warns the target "may no longer appear as a distinct feature". */
+/* The peak-to-peak azimuth excursion, in tracking-grid pixels, below which the
+ * correlation tracker reports a fixed spurious frequency rather than the
+ * target's. Measured on the pulse route at 128 looks and zero overlap over
+ * 0.4 m cells: recovery at 7.3, 10.5 and 14.7 px, and misses at 2.1, 3.1 and
+ * 5.2 px. One geometry and one cell size -- see RS_VALIDATE_AMBIGUITY. */
+#define RS_TRACK_FLOOR_PX 7.0
+
 #define RS_ALPHA_LO 0.045
 #define RS_ALPHA_HI 0.076
 
@@ -242,7 +249,14 @@ rs_validate_level_t rs_validate(const rs_validate_req_t *req,
     /* ---- the smallest motion the tracker could see ------------------------ */
     if (f > 0.0 && req->cell_m > 0.0 && req->upsample > 0) {
         const double proj = cos(req->incidence_rad);
-        const double floor_px = rs_validate_floor_px(req->upsample);
+        /* The floor is the excursion at which the tracker returns the target's
+         * frequency rather than its own artefact, which is MEASURED and is not
+         * the sub-pixel interpolation limit. Reporting the interpolation limit
+         * here would overstate the sensitivity by the ratio printed below --
+         * a factor of 57 at 1/40 px refinement -- and this project's whole
+         * difficulty is that such a number looks like a demonstrated result. */
+        const double floor_px = 0.5 * RS_TRACK_FLOOR_PX;
+        const double interp_px = rs_validate_floor_px(req->upsample);
         /* A vertical displacement A at frequency f gives a radial velocity
          * 2*pi*f*A*proj, which a coregistrator sees as an azimuth shift of
          * R*v_r/V metres. Invert for the amplitude at the floor. */
@@ -268,9 +282,80 @@ rs_validate_level_t rs_validate(const rs_validate_req_t *req,
                      "rather than a verdict.");
         }
         WORST(rs_v_add(out, &n, RS_VALIDATE_SENSITIVITY, lvl, "sensitivity",
-              "at 1/%zu px refinement the floor is %.4f px, which at %.2f m "
-              "cells is a vertical amplitude of %.3f mm at %.3f Hz. %s",
-              req->upsample, floor_px, req->cell_m, 1000.0 * a_min, f, verdict));
+              "the measured floor is %.1f px p2p, which at %.2f m cells is a "
+              "vertical amplitude of %.3f mm at %.3f Hz. %s Sub-pixel "
+              "refinement at 1/%zu px reaches %.4f px, %.0fx finer -- that is "
+              "an interpolation limit, not a demonstrated sensitivity.",
+              RS_TRACK_FLOOR_PX, req->cell_m, 1000.0 * a_min, f, verdict,
+              req->upsample, interp_px, floor_px / interp_px));
+    }
+
+    /* ---- is there any target amplitude this configuration can see? ------- */
+    if (f > 0.0 && req->cell_m > 0.0 && t_sap > 0.0 && req->v_platform_ms > 0.0) {
+        /* Two bounds squeeze the tracked azimuth excursion from both sides, and
+         * a configuration is disqualified outright when they cross.
+         *
+         * CEILING. rs_microm_recommend_looks() requires the peak shift to stay
+         * inside three quarters of a sub-look resolution cell; past that the
+         * correlation argmax wraps. Measured directly: driving a target through
+         * it made the tracker report 1.512 Hz for an injected 0.504 Hz -- the
+         * third harmonic a wrapping sawtooth produces -- and at sixteen times
+         * the amplitude the lowest bin.
+         *
+         * FLOOR. Below roughly 7 px peak-to-peak the tracker reports a fixed
+         * spurious frequency instead of the target's. That artefact is not a
+         * scene property: on a target with NO motion at all the uniform route
+         * returns 1.569 Hz at prominence 27.9, and it returns the same 1.569 Hz
+         * for every injected frequency from 0.2 to 1.4 Hz.
+         *
+         * The sub-look resolution is lambda*R/(2*v_p*t_sap), so a SHORT sub-
+         * aperture raises the ceiling. Overlap shortens nothing -- it widens
+         * each look's band, sharpening the sub-look and lowering the ceiling.
+         * That is how a configuration ends up with no admissible amplitude at
+         * all, which is what runs/giza/2026-07-30-validated-spot-khufu used.
+         *
+         * Both bounds are measured, on one geometry and one cell size, in
+         * runs/.../POSITIVE-CONTROL.md. The crossing test below is the robust
+         * part: it depends on their ratio, not on either absolute value. */
+        const double res_sap  = req->lambda_m * req->slant_range_m
+                              / (2.0 * req->v_platform_ms * t_sap);
+        const double ceil_px  = 2.0 * 0.75 * res_sap / req->cell_m;  /* p2p */
+        const double floor_px = RS_TRACK_FLOOR_PX;
+
+        rs_validate_level_t lvl;
+        char verdict[260];
+        if (ceil_px <= floor_px) {
+            lvl = RS_V_FAIL;
+            snprintf(verdict, sizeof verdict,
+                     "The ceiling is BELOW the floor, so no target amplitude "
+                     "satisfies both: too small and the tracker reports its own "
+                     "artefact, too large and the shift wraps. Shorten the "
+                     "sub-aperture or reduce the overlap.");
+        } else {
+            const double proj = cos(req->incidence_rad);
+            const double k = req->slant_range_m * 2.0 * M_PI * f * proj
+                           / req->v_platform_ms;              /* m shift per m */
+            const double lo = 0.5 * floor_px * req->cell_m / k;
+            const double hi = 0.5 * ceil_px  * req->cell_m / k;
+            lvl = RS_V_PASS;
+            if (req->target_amp_m > 0.0)
+                lvl = (req->target_amp_m >= lo && req->target_amp_m <= hi)
+                    ? RS_V_PASS : RS_V_FAIL;
+            snprintf(verdict, sizeof verdict,
+                     "Admissible vertical amplitude at %.3f Hz is %.3f to "
+                     "%.3f mm, a factor of %.1f. %s", f, 1000.0 * lo,
+                     1000.0 * hi, ceil_px / floor_px,
+                     (req->target_amp_m <= 0.0)
+                       ? "No target amplitude given."
+                       : (lvl == RS_V_PASS) ? "The target is inside it."
+                       : (req->target_amp_m < lo)
+                         ? "The target is BELOW it and would read as artefact."
+                         : "The target is ABOVE it and the shift would wrap.");
+        }
+        WORST(rs_v_add(out, &n, RS_VALIDATE_AMBIGUITY, lvl, "ambiguity",
+              "sub-look resolution %.2f m over %.4f s gives a wrap ceiling of "
+              "%.1f px p2p against a %.1f px artefact floor. %s",
+              res_sap, t_sap, ceil_px, floor_px, verdict));
     }
 
     /* ---- what reading it will cost --------------------------------------- */
