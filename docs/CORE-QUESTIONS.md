@@ -1,6 +1,6 @@
 # Core questions
 
-Five questions for the author of the method, Filippo Biondi, on the formulas as
+Six questions for the author of the method, Filippo Biondi, on the formulas as
 printed in WO 2024/008365 A1, *Scanning Inside Volcanoes…* (RS 14(15):3828) and
 *…Internal Structure of the Great Pyramid of Giza* (RS 14(20):5231).
 
@@ -88,3 +88,79 @@ integrates a whole number of cycles of the motion.
 - Is that the intended construction?
 - If so, what makes a displacement-averaging observable non-zero at exactly
   those frequencies?
+
+The same identity also fixes where the observable band ends, and the two land in
+a way worth asking about directly. A sub-aperture averages the motion over its
+own duration, so the series carries nothing above `1/(2*t_sap)` however finely
+the steps sample it. Since `df = 1/t_sap`, that band edge sits at exactly half
+the first bin:
+
+```
+band edge  = 1/(2*t_sap)        (observation ratio 0.5)
+first bin  = 1/t_sap            (observation ratio 1.0)
+```
+
+The ratio is **2 for every `N_D` and every `B_DL`** -- it does not depend on the
+dwell, the collect or the held-out fraction, so no choice of parameter moves it.
+The lowest frequency the layout can report is therefore twice the highest one it
+can carry, and it falls precisely on the first averaging null.
+
+Measured on a synthetic collect (20 s dwell, `B_DL = B_CD/2`, `N_D = 128`): the
+chain reports 0.100 Hz against a 0.050 Hz band, with the sub-aperture response
+at -240 dB and the observation ratio at exactly 1.00.
+
+- Is the intended sweep span `B_CD - B_DL`, as printed, or something wider?
+- If as printed, what is meant to be read from a spectrum whose every bin sits
+  on an averaging null?
+
+---
+
+## 6. What sets `B_shift`, and can it reach the observable band?
+
+WO 2024/008365 A1 [0004] holds the two bands "rigidly held at a distance
+`B_shift`", chosen to select "the precise vibrational frequency one wishes to
+observe", and adds that the higher it is, the lower the frequency observed. No
+value or selection rule is given, here or in the claims; a best value is stated
+only for the held-out band, `B_CL = B_CD/2`.
+
+The stated property implies a rule. Each pair sample is a displacement
+difference across a lag `dt = B_shift * t_dwell / B_CD`, so its response is
+`|2 sin(pi f dt)|`, greatest at `f*dt = 1/2`:
+
+```
+B_shift_opt(f) = B_CD / (2 * f * t_dwell)
+```
+
+which is inversely proportional to `f`, as the patent says. The difficulty is
+that the sweep geometry in the same document appears to cap it. `N_D` masters of
+width `B_CD - B_DL` stepping by `(B_CD - B_DL)/N_D` leave one step of headroom,
+so `B_shift <= (B_CD - B_DL)/N_D`. Combining:
+
+```
+B_shift_opt(f) <= step   <=>   f >= N_D / (2 * t_sap)   =   N_D * (band edge)
+```
+
+**The lowest frequency `B_shift` can be tuned to is `N_D` times the highest
+frequency the layout can observe** -- again independent of dwell and collect.
+Measured: an implementation refuses `B_shift` above 0.0621 Hz for `N_D = 128` on
+a 15.90 Hz Doppler band, where tuning to that collect's 0.050 Hz band edge would
+need 7.95 Hz, a factor of 128.
+
+Reading `B_shift` as independent of the sweep -- which the patent's wording
+allows, since it advances the rigid pair in `N_D` steps separately -- lets the
+sweep span shrink to buy separation. The two then compete for the same `B_CD *
+B_DL/B_CD` of headroom: span sets the frequency resolution, separation sets the
+lag. Asking for both a resolvable bin and the optimal lag gives
+
+```
+f >= 1.5 / (L * t_dwell),    L = B_DL/B_CD
+```
+
+which exceeds the band edge `1/(2*t_dwell*(1-L))` by `3*(1-L)/L` -- a factor of
+3 at the stated `L = 1/2`, and below 1 only for `L > 3/4`.
+
+- Is there a selection rule for `B_shift` that was omitted?
+- Is `B_shift` intended to be bounded by the sweep step, or may the sweep span
+  shrink as `B_shift` grows?
+- Under either reading, which frequencies is the parameter meant to select, given
+  that both readings place them above the band the sub-apertures carry?

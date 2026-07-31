@@ -194,3 +194,5 @@ deliberately **not** tracked — `*.pdf` is ignored, and they are cited by DOI a
 instead. Keep local copies in `docs/`; do not add them to git.
 
 **`data/` never enters git** beyond its README.
+
+zsh doesn't word-split unquoted variables
