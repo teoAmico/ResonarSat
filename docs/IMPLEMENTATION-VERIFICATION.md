@@ -425,3 +425,114 @@ Until those tests pass, surface vibration spectra may be reported with their
 null controls and operating bounds. Patent-derived depth products should be
 reported as experimental transforms under assumed `(v,f)` parameters, not as
 validated measurements of internal structure.
+
+---
+
+# Addendum, 2026-07-31
+
+The audit above is scoped to the tree at the initial commit and is left as
+written. Two days of work have sharpened several of its findings, invalidated
+one of its measurements, and added checks it predates. Nothing in it is
+contradicted.
+
+## Corrections to the audit's own numbers
+
+**"all 20 registered tests" is now 23.** `test_validate`, `test_pairedecho` and
+`test_ccd` were added since.
+
+**The synthetic correlation table is superseded, and so is the criterion behind
+it.** Its verdicts are per-point matches -- `|recovered - injected|` inside a
+tolerance at one frequency. That criterion is now known to be far too weak: a
+chain emitting a FIXED spurious frequency passes it wherever that value falls
+near the injection. Five conclusions were drawn and withdrawn on 2026-07-31 for
+exactly this reason, among them a configuration reporting 1.569 Hz for every
+injection from 0.2 to 1.4 Hz.
+
+`rs_track_fit()` in `tests/rs_test.h` replaces it: sweep the injected frequency
+and fit the reported against it, requiring slope ~1 (a fixed artefact gives 0)
+and rms under half a bin. `test_nullmotion` asserts both plus a negative control
+that must reject a constant series. At the working operating point: slope 1.008,
+rms 0.0052 Hz against a 0.0252 Hz bound.
+
+A further limit found the same day: that criterion sweeps frequency, not
+speckle. A five-point sweep passing on one clutter realisation still passed a
+configuration that fails on another. Claims about a *configuration* need the
+sweep repeated over independent `--seed` realisations.
+
+## The critical specification problems, sharpened
+
+**#1 `B_shift`.** The patent's own stated property implies the rule it never
+gives. The pair response `|2 sin(pi f dt)|` peaks at `f*dt = 1/2`, so
+`B_shift_opt = B_CD/(2*f*t_dwell)` -- inversely proportional to `f`, as the
+patent says. Combined with the geometric conflict the audit identifies, the
+lowest frequency `B_shift` can be tuned to is exactly `N_D` times the highest
+the layout can observe. Reading `B_shift` as independent of the sweep instead
+gives a factor `3*(1-L)/L`, which is 3 at the stated `B_DL = B_CD/2`. See
+`docs/CORE-QUESTIONS.md` question 6.
+
+**#2 the temporal difference.** Quantified: at the band edge the differential
+costs 20 dB at `N_D = 32`, 32 dB at 128 and 44 dB at 512 -- worsening with the
+parameter one would raise for finer time sampling. For contrast, Multiple
+Aperture InSAR (Bechor & Zebker 2006) performs the same operation at a
+normalised squint of 0.5, half the total Doppler band: 128x the paper's
+separation at `N_D = 128`.
+
+**#3 the measurement null.** Now exact rather than qualitative. With the printed
+step, `N_D*dt = t_sap`, so the bin spacing is `1/t_sap` while the sub-aperture
+averaging response reaches only `1/(2*t_sap)`. **The first bin sits at exactly
+twice the band edge, for every `N_D` and every `B_DL`** -- no parameter choice
+moves it. Measured on a synthetic collect: 0.100 Hz reported against a 0.050 Hz
+band, response -240 dB, observation ratio exactly 1.00. This supplies the
+mechanism for the 225/225 sub-floor windows the audit records.
+
+**#4 `B_perp`.** The standard decomposition makes this sharper than "an
+along-track baseline is not generally an elevation baseline". Bähr (DGK Reihe C
+719, KIT 2013, Sect. 3.1) gives the cross-track form used for height as valid
+only "assuming `B_a ~ 0`", and a sub-aperture separation is *entirely* `B_a`.
+Under zero-Doppler the scalar form then returns `B_par = 0` and
+`B_perp = |B|` -- the whole separation, finite and ordinary-looking, from a
+vector producing no parallax across the line of sight. `K_z` accepts it and
+returns a normal depth axis. On Giza the arc is 238.7 km against a repeat-pass
+spread of order 0.5 km, so `delta_T` reads 0.051 m where a genuine baseline
+gives 24.6 m.
+
+**#6 the acoustic substitution.** `docs/CORE-QUESTIONS.md` question 4 now leads
+with this rather than with the `v/f` versus `v/(2f)` discrepancy, and notes that
+`K_z` carries two substitutions at once -- an along-track separation for an
+elevation baseline, and a mechanical wavelength for the radar one.
+
+## Defects found in this implementation since the audit
+
+These are the reproduction's own, not the patent's:
+
+- **The observable band was computed from the sub-aperture step, not from
+  `t_sap`**, overstating it by `1/(1-overlap)` -- a factor of 100 at 0.99
+  overlap. Every frequency the `uniform-phase-khufu` run's configuration A
+  reported lies above the band it could carry.
+- **The coherence gate can be vacuous.** Overlapping sub-looks share spectral
+  content by construction, so the pair-averaged estimator has a floor; at 0.99
+  overlap that floor is 0.574 against the 0.4 mask actually used.
+- **The sensitivity figure reported the sub-pixel interpolation limit**, not the
+  excursion at which the tracker returns the target's frequency -- optimistic by
+  a factor of 57.
+
+All three are corrected, with `resonarsat validate` now computing them ahead of
+processing. Its checks are pinned by `tests/test_validate.c` against
+configurations whose outcome is already known from measurement.
+
+## Required tests: status
+
+**All six remain open.** Test 3, estimator-specific validation, is the cheapest
+and the recommended next: every failure recorded on 2026-07-31 is the
+*correlation* tracker, while the phase route has a Cramer-Rao floor about 160x
+lower and has barely been exercised. Running `rs_track_fit()` over frequency and
+seed on the phase estimator would establish whether the difficulty is
+correlation-specific.
+
+Test 1 remains blocked externally: `docs/DATASETS.md` records that no
+corner-reflector collect with synchronous ground truth exists in any open
+archive.
+
+The audit's closing position is unchanged. Surface vibration spectra may be
+reported with null controls and operating bounds; depth products remain
+experimental transforms under assumed `(v, f)`.
