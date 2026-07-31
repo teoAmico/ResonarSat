@@ -56,6 +56,50 @@ line of sight.
 - If it is the along-track sub-aperture phase-centre separation, what projection
   converts it to a perpendicular component?
 
+**What the standard decomposition says.** Bähr, *Orbital Effects in Spaceborne
+SAR Interferometry* (DGK Reihe C 719 / KIT 2013, refereed by Hanssen), §3.1
+defines the baseline as the difference of two sensor positions, `B = x_S - x_M`,
+and decomposes it two ways. The general scalar form is
+
+```
+B_par  = <B, r_M>                    r_M the unit line-of-sight
+B_perp = sqrt(|B|^2 - B_par^2)
+```
+
+and the form actually used for height is the projection onto the cross-track
+plane, `B_perp ~ B_h cos(theta) + B_v sin(theta)`, stated explicitly **"assuming
+B_a ~ 0"** -- `B_a` being the along-track component. Bähr notes the
+simplification "can entail more or less significant biases when used for the
+computation of the height ambiguity".
+
+That assumption is not merely unmet for sub-aperture diversity; it is inverted.
+A sub-aperture phase-centre separation is *entirely* along-track: `B = B_a e_a`
+with no horizontal or vertical part. Under the zero-Doppler condition the line
+of sight is perpendicular to the velocity, so `<e_a, r_M> = 0` and the scalar
+form returns
+
+```
+B_par  = 0
+B_perp = |B| = B_a
+```
+
+The scalar `B_perp` is therefore **not zero** -- it equals the whole along-track
+separation. But the vector it measures points along track, so it produces no
+height parallax, while `K_z` and `delta_T` will accept the number and return a
+finite, ordinary-looking depth axis from it. This is the failure mode the rest of
+this project keeps meeting: a plausible result from a configuration that cannot
+produce it.
+
+The independent literature points the same way. Azimuth sub-aperture pairs are
+used in Multiple-Aperture InSAR (Bechor & Zebker 2006) to measure **along-track
+displacement**, which is what an along-track baseline is sensitive to. We are
+not aware of a use of azimuth sub-aperture separation as a height baseline.
+
+- Is `B_perp` in Eq. 22 the scalar `sqrt(|B|^2 - B_par^2)`, or the cross-track
+  projection that the height ambiguity conventionally uses?
+- If the former, what supplies the height sensitivity, given that the separation
+  is along-track and produces no parallax across the line of sight?
+
 ---
 
 ## 4. Is `lambda = v/f` or `v/(2f)`, and what is `f`?
