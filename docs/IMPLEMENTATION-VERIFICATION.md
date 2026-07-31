@@ -43,7 +43,7 @@ depth product.
 ### Primary specification
 
 The publications themselves are not redistributed here; fetch them from the
-publisher. Local copies in `docs/` are ignored by git.
+publisher.
 
 - WO 2024/008365 A1,
   https://patents.google.com/patent/WO2024008365A1/en
