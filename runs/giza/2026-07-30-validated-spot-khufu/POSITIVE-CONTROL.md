@@ -600,3 +600,45 @@ physical windows smaller than a sub-look resolution cell in some arms, and
 correlation windows of 128 px or more in others. Until that is done, the
 question this pass opened -- whether any operating point on this collect
 passes -- has no answer.
+
+## Addendum: the 0.88 evidence, redone in band
+
+The runs above that refuted the fraction model were all injected at 0.500 Hz
+against a configuration whose band edge is 0.499 Hz -- eta 0.501, exactly at the
+limit. That was a fair objection to them, so they were redone at 0.200 Hz,
+eta 0.20, well inside the band.
+
+The standard offset-tracking CRB (Bamler & Eineder 2005) is in units of the
+resolution cell and falls as `1/sqrt(N)` with `N` the independent samples in the
+window. That predicts the 0.88 configuration should be **41x better** than the
+working one -- `res/sqrt(N)` of 0.126 m against 5.164 m -- because its finer
+sub-look packs 102 independent samples into the same 12.8 m window against 2.5.
+
+Excursion fixed at 2 px, frequency swept, all in band:
+
+| injected | true bin | reported | prominence |
+|---|---|---|---|
+| 0.15 Hz | 2.87 | 0.157 | 116.3 |
+| 0.20 Hz | 3.82 | 0.105 | 145.9 |
+| 0.30 Hz | 5.74 | 0.209 | 66.1 |
+| 0.40 Hz | 7.65 | 0.157 | 27.1 |
+
+Reported values sit in bins 2-4 while the truth runs 3 to 8. **It does not
+track.** The apparent recoveries at 1, 2 and 3 px in the amplitude sweep were a
+low-bin artefact landing near a low injected frequency, at prominences up to
+330 -- the anti-correlation between prominence and correctness again.
+
+So the conclusion survives the objection, and the CRB reading is eliminated
+cleanly: it predicts recovery at 1 px and the configuration tracks nothing at
+any excursion tried.
+
+**This also moves overlap into the frame.** The failing and working
+configurations share cell, window and pixel window size; they differ in
+sub-look resolution, independent-sample count, route and overlap. Theory says
+the failing one should be better on the first two. Both routes fail at 0.88
+overlap -- uniform reports a fixed 1.569 Hz, pulse a fixed 0.314 Hz -- so the
+route is not the discriminator either. High overlap is implicated on its own,
+and by a mechanism none of the three floor models describes.
+
+The designed experiment therefore needs four factors, not three: cell,
+sub-look resolution, pixel window size, and overlap.
