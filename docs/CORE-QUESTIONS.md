@@ -8,34 +8,69 @@ They are requests to clarify the equations, not challenges to the results. Each
 is a place where an independent implementation had to choose between readings,
 and the choice changes the output.
 
+Equation numbers follow the patent. For reference, the depth stage as printed is
+
+$$
+\mathbf{Y}=\mathbf{A}(K_z,z)\,\mathbf{h}(z)
+\qquad\text{(Eq. 23)},
+\qquad
+\hat{\mathbf{h}}(z)=\mathbf{A}^{+}\mathbf{Y}
+\qquad\text{(Eq. 24)},
+$$
+
+with $\mathbf{Y}$ the complex sub-pixel shift vector of Eq. 21, whose $i$-th
+entry combines the two tracked components as
+
+$$
+Y_i=\Delta x_{\mathrm{az},i}+j\,\Delta x_{\mathrm{rg},i}.
+$$
+
 ---
 
 ## 1. Equation 22: what is `t`?
 
-The steering matrix is printed as
+The steering matrix is printed with elements
 
-```
-A(K_z, z) = [ 1, exp(j*2*pi*K_z2*t*z_0), ..., exp(j*2*pi*K_z(k-1)*t*z_0) ]
-            [ ...                                                        ]
-```
+$$
+A_{ij}=\exp\!\left(j\,2\pi\,K_{z,i}\,t\,z_j\right),
+\qquad
+K_{z,i}=\frac{4\pi B_{\perp,i}}{\lambda\,r_i\sin\theta}.
+$$
 
-`t` is not defined in the surrounding text, and `delta_T = lambda*R/(2*A)`,
-derived from the same matrix, contains no `t`.
+`t` is not defined in the surrounding text, and the depth resolution derived from
+the same matrix,
+
+$$
+\delta_T=\frac{\lambda R}{2A},
+$$
+
+contains no `t`.
 
 - Is `t` one scalar for the whole matrix, or per-observation `t_i`?
-- `K_z = 4*pi*B_perp/(lambda*r_i*sin(theta))` is already in radians per metre.
-  Is the leading `2*pi` intentional, or redundant with it?
-- Is the intended form simply `exp(j*K_z,i*z_j)`?
+- $K_z$ as defined already carries $4\pi$, so it is an angular spatial frequency
+  in radians per metre. Is the leading $2\pi$ intentional, or redundant with it?
+- Is the intended form simply
+
+$$
+A_{ij}=\exp\!\left(j\,K_{z,i}\,z_j\right)?
+$$
 
 ---
 
 ## 2. Equation 23: what are the dimensions of `A`?
 
-Eq. 21 gives `Y` as `k x 1`. Eq. 22 prints `A` with `k` columns and `F` rows.
-Eq. 24 prints `h(z)` as a row.
+Eq. 21 gives `Y` as $k\times1$. Eq. 22 prints `A` with $k$ columns and $F$ rows.
+Eq. 24 prints `h(z)` as a row, $1\times F$.
 
-`Y = A h(z)` is conformable only if `A` is `k x F` and `h(z)` is `F x 1`. Is
-that the intended orientation, with rows as sub-aperture observations and
+$\mathbf{Y}=\mathbf{A}\mathbf{h}$ is conformable only in one orientation:
+
+$$
+\underbrace{\mathbf{Y}}_{k\times1}
+=\underbrace{\mathbf{A}}_{k\times F}\;
+\underbrace{\mathbf{h}}_{F\times1}.
+$$
+
+Is that the intended orientation, with rows as sub-aperture observations and
 columns as depth cells?
 
 ---
@@ -61,13 +96,22 @@ SAR Interferometry* (DGK Reihe C 719 / KIT 2013, refereed by Hanssen), §3.1
 defines the baseline as the difference of two sensor positions, `B = x_S - x_M`,
 and decomposes it two ways. The general scalar form is
 
-```
-B_par  = <B, r_M>                    r_M the unit line-of-sight
-B_perp = sqrt(|B|^2 - B_par^2)
-```
+$$
+B_\parallel=\langle\vec B,\hat r_M\rangle,
+\qquad
+B_\perp=\sqrt{|\vec B|^2-B_\parallel^2},
+$$
+
+with $\hat r_M$ the unit line of sight
 
 and the form actually used for height is the projection onto the cross-track
-plane, `B_perp ~ B_h cos(theta) + B_v sin(theta)`, stated explicitly **"assuming
+plane,
+
+$$
+B_\perp\approx B_h\cos\theta+B_v\sin\theta,
+$$
+
+stated explicitly **"assuming
 B_a ~ 0"** -- `B_a` being the along-track component. Bähr notes the
 simplification "can entail more or less significant biases when used for the
 computation of the height ambiguity".
@@ -78,10 +122,11 @@ with no horizontal or vertical part. Under the zero-Doppler condition the line
 of sight is perpendicular to the velocity, so `<e_a, r_M> = 0` and the scalar
 form returns
 
-```
-B_par  = 0
-B_perp = |B| = B_a
-```
+$$
+B_\parallel=0,
+\qquad
+B_\perp=|\vec B|=B_a .
+$$
 
 The scalar `B_perp` is therefore **not zero** -- it equals the whole along-track
 separation. But the vector it measures points along track, so it produces no
@@ -107,17 +152,32 @@ not aware of a use of azimuth sub-aperture separation as a height baseline.
 The factor-of-two question below is the smaller half of this. The prior question
 is which wave `lambda` refers to at all.
 
-`K_z = 4*pi*B_perp/(lambda*r_i*sin(theta))` is the standard TomoSAR vertical
-wavenumber, and in every independent derivation of it `lambda` is the **radar
-carrier wavelength** `lambda_c = c/f_c` -- Zhu & Bamler (*Very High Resolution
+The standard TomoSAR vertical wavenumber
+
+$$
+K_z=\frac{4\pi B_\perp}{\lambda\,r_i\sin\theta}
+$$
+
+uses, in every independent derivation of it, the **radar carrier wavelength**
+$\lambda_c=c/f_c$ -- Zhu & Bamler (*Very High Resolution
 Spaceborne SAR Tomography in Urban Environment*, TGRS 48(12), 2010); Kim,
 Villano & Krieger (*Volume Structure Retrieval Using Drone-Based SAR
-Interferometry*, RS 16(8), 2024), who write the same expression directly as
-`4*pi*B_perp*f_c/(c*R*sin(theta))`.
+Interferometry*, RS 16(8), 2024), who write the same expression directly in
+terms of the radar frequency:
+
+$$
+K_z=\frac{4\pi B_\perp f_c}{c\,R\sin\theta}.
+$$
 
 The patent instead supplies a **mechanical** wavelength: an elastic wave speed
-and a vibration frequency, `6600/22000 = 0.30 m`. The arithmetic is a correct
-`lambda_s = v_s/f_v`; the question is why `lambda_s` stands in a formula derived
+and a vibration frequency, $6600/22000=0.30$ m. The arithmetic is a correct
+mechanical wavelength,
+
+$$
+\lambda_s=\frac{v_s}{f_v},
+$$
+
+but the question is why $\lambda_s$ stands in a formula derived
 with `lambda_c`. The micro-Doppler literature keeps them strictly apart --
 Clemente & Soraghan carry radar phase through `lambda_c` and the mechanical
 motion separately as `A_v*cos(omega_v*eta)`, coupled but never interchangeable.
@@ -144,9 +204,9 @@ alone removes the expression's derivation.
 With the master–slave pair stepped by `(B_CD - B_DL)/N_D` across a span of
 `B_CD - B_DL`, the record length is
 
-```
-N_D * dt = t_dwell * (B_CD - B_DL) / B_CD = t_sap
-```
+$$
+N_D\,\Delta t=t_{\mathrm{dwell}}\frac{B_{CD}-B_{DL}}{B_{CD}}=t_{\mathrm{sap}}
+$$
 
 for every `N_D` and every `B_DL`. Then `df = 1/t_sap`, and spectral bin `k` sits
 at `f_k = k/t_sap` — an integer observation ratio, where a sub-aperture
@@ -162,10 +222,13 @@ own duration, so the series carries nothing above `1/(2*t_sap)` however finely
 the steps sample it. Since `df = 1/t_sap`, that band edge sits at exactly half
 the first bin:
 
-```
-band edge  = 1/(2*t_sap)        (observation ratio 0.5)
-first bin  = 1/t_sap            (observation ratio 1.0)
-```
+$$
+f_{\mathrm{band}}=\frac{1}{2t_{\mathrm{sap}}}\;(\eta=0.5),
+\qquad
+f_1=\Delta f=\frac{1}{t_{\mathrm{sap}}}\;(\eta=1.0),
+\qquad
+\frac{f_1}{f_{\mathrm{band}}}=2 .
+$$
 
 The ratio is **2 for every `N_D` and every `B_DL`** -- it does not depend on the
 dwell, the collect or the held-out fraction, so no choice of parameter moves it.
@@ -191,21 +254,34 @@ value or selection rule is given, here or in the claims; a best value is stated
 only for the held-out band, `B_CL = B_CD/2`.
 
 The stated property implies a rule. Each pair sample is a displacement
-difference across a lag `dt = B_shift * t_dwell / B_CD`, so its response is
-`|2 sin(pi f dt)|`, greatest at `f*dt = 1/2`:
+difference across a fixed lag
 
-```
-B_shift_opt(f) = B_CD / (2 * f * t_dwell)
-```
+$$
+\Delta t_{\mathrm{pair}}=\frac{B_{\mathrm{shift}}\,t_{\mathrm{dwell}}}{B_{CD}},
+$$
+
+so the observable's response is
+
+$$
+|H(f)|=\left|2\sin\!\left(\pi f\,\Delta t_{\mathrm{pair}}\right)\right|,
+$$
+
+greatest at $f\,\Delta t_{\mathrm{pair}}=1/2$, which gives
+
+$$
+B_{\mathrm{shift}}^{\mathrm{opt}}(f)=\frac{B_{CD}}{2f\,t_{\mathrm{dwell}}},
+$$
 
 which is inversely proportional to `f`, as the patent says. The difficulty is
 that the sweep geometry in the same document appears to cap it. `N_D` masters of
 width `B_CD - B_DL` stepping by `(B_CD - B_DL)/N_D` leave one step of headroom,
 so `B_shift <= (B_CD - B_DL)/N_D`. Combining:
 
-```
-B_shift_opt(f) <= step   <=>   f >= N_D / (2 * t_sap)   =   N_D * (band edge)
-```
+$$
+B_{\mathrm{shift}}^{\mathrm{opt}}(f)\le\frac{B_{CD}-B_{DL}}{N_D}
+\iff
+f\ge\frac{N_D}{2t_{\mathrm{sap}}}=N_D\,f_{\mathrm{band}} .
+$$
 
 **The lowest frequency `B_shift` can be tuned to is `N_D` times the highest
 frequency the layout can observe** -- again independent of dwell and collect.
@@ -219,12 +295,18 @@ sweep span shrink to buy separation. The two then compete for the same `B_CD *
 B_DL/B_CD` of headroom: span sets the frequency resolution, separation sets the
 lag. Asking for both a resolvable bin and the optimal lag gives
 
-```
-f >= 1.5 / (L * t_dwell),    L = B_DL/B_CD
-```
+$$
+f\ge\frac{1.5}{L\,t_{\mathrm{dwell}}},
+\qquad L=\frac{B_{DL}}{B_{CD}},
+$$
 
-which exceeds the band edge `1/(2*t_dwell*(1-L))` by `3*(1-L)/L` -- a factor of
-3 at the stated `L = 1/2`, and below 1 only for `L > 3/4`.
+which exceeds the band edge $f_{\mathrm{band}}=1/[2t_{\mathrm{dwell}}(1-L)]$ by
+
+$$
+\frac{3(1-L)}{L},
+$$
+
+a factor of 3 at the stated $L=1/2$, and below 1 only for $L>3/4$.
 
 - Is there a selection rule for `B_shift` that was omitted?
 - Is `B_shift` intended to be bounded by the sweep step, or may the sweep span

@@ -35,7 +35,8 @@ notice. Pin a commit if you build on it.
 | [`docs/DATASETS.md`](docs/DATASETS.md) | Which free SAR archives carry collects this method can actually use, which look usable and are not, and what a blind test would still require. |
 | [`data/README.md`](data/README.md) | Where the collects come from, how to fetch one and how to verify it arrived intact. |
 | [`runs/`](runs/README.md) | Every output this software has produced from a real collect — one directory per run, each carrying the commands that made it, the question it was meant to answer and what it actually showed. Null results included. |
-| [`docs/CORE-QUESTIONS.md`](docs/CORE-QUESTIONS.md) | Five points in the published equations where an implementation has to choose between readings, and the choice changes the output. |
+| [`docs/CORE-QUESTIONS.md`](docs/CORE-QUESTIONS.md) | Six points in the published equations where an implementation has to choose between readings, and the choice changes the output. |
+| [`docs/IMPLEMENTATION-VERIFICATION.md`](docs/IMPLEMENTATION-VERIFICATION.md) | Whether this code implements the patent, operation by operation; what independent literature does and does not support; and the specification problems and measured defects found so far. |
 | `resonarsat <command>` | Full usage for any command, with the reasoning behind each option. |
 
 ## Why
