@@ -238,6 +238,66 @@ int main(void)
         printf("    %s\n", a->detail);
     }
 
+    /* The frequency a motionless scene produced, against the configuration
+     * that produced it. The step-based f_max is 4.16 Hz and would call this
+     * comfortably in band; the averaging response puts it out of reach. */
+    RS_CASE("a frequency past the sub-aperture's averaging response is refused");
+    {
+        rs_validate_req_t r;
+        rs_validate_req_default(&r);
+        r.dwell_s = 20.0;
+        r.lambda_m = 0.031228;
+        r.slant_range_m = 610328.0;
+        r.v_platform_ms = 7500.0;
+        r.incidence_rad = 34.99 * M_PI / 180.0;
+        r.n_pulse = 8000;
+        r.alpha = 1.0 / 19.96;       /* t_sap 1.002 s -> band 0.499 Hz */
+        r.overlap = 0.88;            /* dt 0.120 s -> step would say 4.16 Hz */
+        r.cell_m = 0.4;
+        r.upsample = 10;
+        r.grid_n = 320;
+
+        r.target_freq_hz = 1.569;    /* what the static scene reported */
+        rs_validate(&r, f, &n);
+        const rs_validate_finding_t *b = find(f, n, RS_VALIDATE_BAND);
+        RS_CHECK(b != NULL && b->level == RS_V_FAIL);
+        RS_CHECK(strstr(b->detail, "ABOVE the band") != NULL);
+        printf("    %s\n", b->detail);
+
+        /* eta = f*t_sap, so the band edge is exactly eta = 0.5. */
+        r.target_freq_hz = 0.40;     /* eta 0.401 */
+        rs_validate(&r, f, &n);
+        b = find(f, n, RS_VALIDATE_BAND);
+        RS_CHECK(b != NULL && b->level == RS_V_PASS);
+    }
+
+    /* And the configuration that recovers 7 injected frequencies out of 7 must
+     * not have any of them refused -- the check has to be non-trivial. */
+    RS_CASE("the working operating point keeps its whole recovered range");
+    {
+        rs_validate_req_t r;
+        rs_validate_req_default(&r);
+        r.dwell_s = 20.0;
+        r.lambda_m = 0.031228;
+        r.slant_range_m = 610328.0;
+        r.v_platform_ms = 7500.0;
+        r.incidence_rad = 34.99 * M_PI / 180.0;
+        r.n_pulse = 8000;
+        r.alpha = 1.0 / 128.0;       /* t_sap 0.156 s -> band 3.2 Hz */
+        r.overlap = 0.0;
+        r.cell_m = 0.4;
+        r.upsample = 10;
+        r.grid_n = 320;
+
+        const double got[7] = { 0.101, 0.202, 0.302, 0.504, 0.706, 1.008, 1.411 };
+        for (int i = 0; i < 7; i++) {
+            r.target_freq_hz = got[i];
+            rs_validate(&r, f, &n);
+            const rs_validate_finding_t *b = find(f, n, RS_VALIDATE_BAND);
+            RS_CHECK(b != NULL && b->level == RS_V_PASS);
+        }
+    }
+
     /* ------------------------------------------------------------------
      * Guards.
      * ------------------------------------------------------------------ */

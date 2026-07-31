@@ -155,7 +155,32 @@ rs_validate_level_t rs_validate(const rs_validate_req_t *req,
                             : "Below three bins, so indistinguishable from drift."));
     }
 
-    /* ---- Nyquist of the sub-aperture series ------------------------------- */
+    /* ---- the band the sub-apertures can actually carry -------------------
+     *
+     * TWO DIFFERENT LIMITS, AND THE LOOSER ONE IS NOT THE REAL ONE. The step
+     * between sub-apertures sets how finely the series is sampled, giving
+     * 1/(2*dt). But each sub-aperture AVERAGES the target's motion over its own
+     * duration, which is a lowpass whose first null is at 1/t_sap -- the same
+     * null RS_VALIDATE_AVERAGING_NULL reports. Overlap shrinks dt without
+     * shortening t_sap, so it buys finer sampling of the same band, not a wider
+     * band. Quoting 1/(2*dt) at 88% overlap overstates the reach by a factor of
+     * 1/(1-overlap), which is 8.3.
+     *
+     * This is not a theoretical worry. On a scene with NO motion at all the
+     * uniform route at 159 looks and 0.88 overlap reports 1.569 Hz at
+     * prominence 27.9, and reports the same 1.569 Hz for every injected
+     * frequency from 0.2 to 1.4 Hz. Its dt-based f_max is 4.16 Hz, so that
+     * number looks comfortably in band. Its t_sap is 1.002 s, so the first
+     * averaging null is at 0.998 Hz and the artefact sits PAST it, where the
+     * sub-aperture has essentially no response. Nothing measured can live
+     * there.
+     *
+     * Note what this makes of the observation ratio: eta = f*t_sap, so
+     * f < 1/(2*t_sap) is exactly eta < 0.5. The 0.5 bracket withdrawn from
+     * RS_VALIDATE_OBSERVATION_RATIO was the right number reached by the wrong
+     * argument -- it is not about resolving paired echoes, it is the
+     * sub-aperture's own averaging response, and it is derived rather than
+     * measured. */
     {
         const double denom = (req->alpha > 0.0)
                            ? (1.0 / req->alpha) - req->overlap : 0.0;
@@ -163,14 +188,18 @@ rs_validate_level_t rs_validate(const rs_validate_req_t *req,
                              ? denom / (1.0 - req->overlap) : 0.0;
         const double d = (n_looks > 1.0)
                        ? (req->dwell_s - t_sap) / (n_looks - 1.0) : req->dwell_s;
-        const double f_max = 1.0 / (2.0 * d);
+        const double f_step = 1.0 / (2.0 * d);
+        const double f_max  = (t_sap > 0.0) ? 1.0 / (2.0 * t_sap) : f_step;
         WORST(rs_v_add(out, &n, RS_VALIDATE_BAND,
               (f <= 0.0 || f < f_max) ? RS_V_PASS : RS_V_FAIL, "observable band",
-              "alpha %.3f%% and overlap %.2f give %.0f sub-apertures, dt %.4f s, "
-              "so f_max is %.3f Hz.%s",
-              100.0 * req->alpha, req->overlap, n_looks, d, f_max,
-              (f > 0.0 && f >= f_max) ? " The target is above it and will alias."
-                                      : ""));
+              "alpha %.3f%% and overlap %.2f give %.0f sub-apertures. Each "
+              "averages over %.4f s, so the band reaches %.3f Hz; the %.4f s "
+              "step would suggest %.3f Hz, which overlap does not buy.%s",
+              100.0 * req->alpha, req->overlap, n_looks, t_sap, f_max, d, f_step,
+              (f > 0.0 && f >= f_max)
+                ? " The target is ABOVE the band: past the sub-aperture's own "
+                  "averaging response, where a reported peak cannot be signal."
+                : ""));
 
         /* The spectral route splits a focused image and needs twice as many
          * azimuth lines as looks. The pulse route has no such constraint. */

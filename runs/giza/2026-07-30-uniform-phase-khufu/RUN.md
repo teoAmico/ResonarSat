@@ -617,3 +617,33 @@ quoting a number from it.
 
 - A tomogram. Neither configuration produced a micro-motion result worth
   focusing into depth, and building one would have meant inverting a drift.
+
+---
+
+# Amendment, 2026-07-31: configuration A was outside its own band
+
+`f_max` above is computed from the **step** between sub-apertures. That is the
+wrong quantity. Each sub-aperture averages the target's motion over its own
+duration `t_sap`, which is a lowpass whose first null is at `1/t_sap`, so the
+series carries nothing above `1/(2*t_sap)` however finely overlap samples it.
+Overlap buys resolution in time, not bandwidth.
+
+| config | t_sap | f_max as quoted | band it can carry | overstated |
+|---|---|---|---|---|
+| A, uniform N=128 ov=0.99 | 14.480 s | 3.45 Hz | **0.0345 Hz** | 100x |
+| B, pulse N=2048 ov=0.9 | 0.160 s | 31.47 Hz | 3.129 Hz | 10x |
+
+**Every frequency A reported is above the band A could carry** -- 0.054 Hz by a
+factor of 1.6, 0.324 Hz by 9.4, and 1.026 Hz by 30. The high overlap is what did
+it: at fixed `n_looks`, `denom = N - (N-1)*overlap` collapses to 2.27 at 0.99,
+so each sub-aperture spans 14.5 seconds of a 32.9 second dwell.
+
+This does not overturn the run's conclusion, which was already a null. It
+supplies the mechanism, and it explains **P5** directly: the peak follows
+`--fmin` because there is no signal anywhere in the search region to compete
+with the noise, the entire region being out of band.
+
+B is inside its band at 0.324 Hz and is unaffected by this.
+
+`resonarsat validate` now computes the band from `t_sap`, and `mmotion` warns at
+run time when the peak it just printed came from beyond it.

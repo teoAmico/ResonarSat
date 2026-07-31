@@ -98,10 +98,15 @@ a simulated world containing no motion. Use `--null-static`, which a motionless 
 walk over. The measurement is in
 [`runs/giza/2026-07-30-uniform-phase-khufu/`](runs/giza/2026-07-30-uniform-phase-khufu/RUN.md).
 
-**Two different limits are easy to confuse.** The step between sub-apertures sets how finely
-in time the ground is sampled, and so the highest frequency representable at all; each
-sub-aperture's own length sets how strongly a frequency survives. Overlapping separates the
-two. But the sub-aperture length has an upper bound as well, and it is the one that bites. The
+**Overlap does not widen the band.** The step between sub-apertures sets how finely the series
+is sampled, but each sub-aperture *averages* the motion over its own duration — a lowpass whose
+first null is at `1/t_sap`. So the observable band is `1/(2·t_sap)` no matter how finely overlap
+samples it, and quoting the step's `1/(2·dt)` overstates the reach by `1/(1-overlap)`. At 99%
+overlap that is a factor of 100. Since the observation ratio is `f · t_sap`, the band edge is
+exactly `η = 0.5`. A peak reported from beyond it is an artefact of the processing: a motionless
+target produces one too, at higher prominence than a real signal.
+
+**The sub-aperture length has an upper bound as well, and it is the one that bites.** The
 tracked azimuth excursion is squeezed from both sides: it must stay inside about three quarters
 of a **sub-look** resolution cell or the correlation argmax wraps, and it must exceed roughly
 7 px peak-to-peak or the tracker reports a fixed spurious frequency of its own instead. Since a

@@ -468,3 +468,56 @@ and 27.7. **Prominence is anti-correlated with correctness across this set.** It
 measures how cleanly a peak stands out, and a saturating argmax produces a very
 clean peak at the wrong frequency -- cleaner than a real signal near the floor.
 It cannot be used to decide whether a detection is real.
+
+---
+
+# 2026-07-31, fourth pass: what the artefact actually is
+
+## A guard that was built and did not work
+
+The sawtooth pinned to `+-win_az/2` looked like the mechanism, so a saturation
+metric was added to `rs_microm_t`: per window, the fraction of looks whose shift
+sits within a pixel of the search extent. **It does not discriminate and was
+removed.** Over the static uniform run, the 56 windows reporting the 1.569 Hz
+artefact have a *lower* mean saturation (0.023) than the 305 that do not
+(0.052), and both have median zero. The pinned sawtooth is real in the windows
+where it appears, but it is not what produces the artefact across the grid.
+Recorded because the metric is an obvious thing to reach for twice.
+
+## What it is: the band was computed from the wrong quantity
+
+The step between sub-apertures sets how finely the series is sampled. It does
+not set what the series can carry. Each sub-aperture **averages** the motion
+over its own duration, a lowpass whose first null is at `1/t_sap` -- the same
+null `RS_VALIDATE_AVERAGING_NULL` already reported without the connection being
+drawn. So the band is `1/(2*t_sap)`, and overlap buys resolution in time rather
+than bandwidth. Quoting `1/(2*dt)` overstates it by `1/(1-overlap)`.
+
+For the configuration that produces the artefact: `t_sap` 1.002 s, first
+averaging null 0.998 Hz, band 0.499 Hz. **The 1.569 Hz it reports on a
+motionless scene is past the first null**, where the sub-aperture has
+essentially no response. Nothing measured can live there. Its dt-based `f_max`
+of 4.158 Hz called that comfortably in band, which is why it went unnoticed
+through an entire ladder.
+
+The working configuration is untouched: `t_sap` 0.156 s gives a 3.20 Hz band,
+and all seven frequencies it recovered fall inside it. The check is not
+rejecting everything.
+
+## And it puts eta = 0.5 back, derived
+
+`eta = f*t_sap`, so `f < 1/(2*t_sap)` **is** `eta < 0.5`. The bracket withdrawn
+earlier was the right number reached by the wrong argument: it is not about
+resolving paired echoes, it is the sub-aperture's own averaging response, and it
+follows from arithmetic rather than from the confounded comparison. The
+paired-echo mechanism is still real and still confirmed by
+`tests/test_pairedecho.c`; it simply is not what sets this bound.
+
+## Retroactive
+
+`runs/giza/2026-07-30-uniform-phase-khufu` configuration A ran at `--overlap
+0.99`, where `denom = N - (N-1)*overlap` collapses to 2.27 and each sub-aperture
+spans 14.5 s of a 32.9 s dwell. Its band is 0.0345 Hz. **Every frequency it
+reported is above it** -- 0.054 by 1.6x, 0.324 by 9.4x, 1.026 by 30x -- and that
+is the mechanism behind its own P5 observation that the peak follows `--fmin`.
+Amended in that run's RUN.md. Configuration B is inside its band and unaffected.

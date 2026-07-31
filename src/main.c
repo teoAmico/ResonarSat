@@ -1580,6 +1580,27 @@ static int rs_cmd_mmotion(int argc, char **argv)
            "quality %.3f, peak-to-peak velocity %.1f mm/s\n",
            best, spec.dominant_freq[best], prom, spec.quality[best], pp * 1e3);
 
+    /* Is the winner even inside the band the sub-apertures can carry?
+     *
+     * Each sub-aperture averages the motion over its own duration, so the
+     * series carries nothing above 1/(2*t_sap) however finely overlap samples
+     * it. Reporting a peak from beyond that is reporting an artefact: on a
+     * motionless scene the uniform route at 0.88 overlap returns 1.569 Hz here
+     * at prominence 27.9, against a t_sap of 1.002 s that reaches 0.499 Hz.
+     * Prominence cannot be used to notice -- across the measured set it runs
+     * ANTI-correlated with correctness -- so the check has to be this one. */
+    if (stack.t_sap > 0.0) {
+        const double f_band = 1.0 / (2.0 * stack.t_sap);
+        if (spec.dominant_freq[best] >= f_band) {
+            printf("  WARNING: that is above %.3f Hz, the most this %.4f s "
+                   "sub-aperture\n  can carry. Overlap samples the series more "
+                   "finely but does not widen\n  the band. A peak from beyond "
+                   "it is an artefact of the processing,\n  not a property of "
+                   "the scene -- a motionless target produces one too.\n",
+                   f_band, stack.t_sap);
+        }
+    }
+
     /* How many windows were eligible, printed beside the winner rather than
      * left implicit.
      *
