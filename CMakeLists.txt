@@ -154,6 +154,7 @@ set(RS_TESTS
     test_nullmotion
     test_ccd
     test_validate
+    test_pairedecho
     test_phaselink
     test_modelc
     test_cphd
