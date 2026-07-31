@@ -44,8 +44,20 @@
 /* The peak-to-peak azimuth excursion, in tracking-grid pixels, below which the
  * correlation tracker reports a fixed spurious frequency rather than the
  * target's. Measured on the pulse route at 128 looks and zero overlap over
- * 0.4 m cells: recovery at 7.3, 10.5 and 14.7 px, and misses at 2.1, 3.1 and
- * 5.2 px. One geometry and one cell size -- see RS_VALIDATE_AMBIGUITY. */
+ * 0.4 m cells, sweeping amplitude at a fixed 0.5 Hz: an isolated point misses
+ * at 3, 4, 5 and 6 px and recovers from 7 px up.
+ *
+ * The floor DEPENDS ON THE SCENE. Repeating the sweep against a coherently
+ * vibrating clutter patch -- which is what sim_cphd's help says to use when the
+ * question is about the tracker rather than about focusing -- moves it to 4 px.
+ * The conservative value is kept, for a measured reason: a configuration whose
+ * window is only marginally open does not work. The uniform route at 159 looks
+ * and 0.88 overlap has a 4.8 px ceiling, so against a 4 px textured floor it
+ * has a nominal 4.0-4.8 px window; targets placed at 4.0, 4.4 and 4.8 px inside
+ * that window all miss. A ceiling must clear the floor by a real margin, not
+ * merely exceed it, and where that margin lies is not measured.
+ *
+ * One geometry and one cell size -- see RS_VALIDATE_AMBIGUITY. */
 #define RS_TRACK_FLOOR_PX 7.0
 
 #define RS_ALPHA_LO 0.045
@@ -270,7 +282,8 @@ rs_validate_level_t rs_validate(const rs_validate_req_t *req,
             lvl = (margin >= 3.0) ? RS_V_PASS : (margin >= 1.0) ? RS_V_WARN
                                                                 : RS_V_FAIL;
             snprintf(verdict, sizeof verdict,
-                     "The %.2f mm asked for is %.1fx that. %s",
+                     "The %.2f mm asked for is %.1fx that. %s Textured ground "
+                     "lowers the floor to 4 px, so about 4/7 of the figure.",
                      1000.0 * req->target_amp_m, margin,
                      (lvl == RS_V_PASS) ? "Comfortable."
                      : (lvl == RS_V_WARN) ? "Within a factor of three of the "

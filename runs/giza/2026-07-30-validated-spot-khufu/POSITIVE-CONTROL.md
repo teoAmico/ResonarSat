@@ -410,3 +410,61 @@ detection floor. The measured floor is 7 px p2p. At 0.1 Hz on Giza that moves
 the smallest visible vertical amplitude from 1.2 mm to **68.7 mm**, and even a
 short sub-aperture only gives an admissible band of 69-95 mm. Seven centimetres.
 Both numbers are now printed, with the interpolation limit labelled as such.
+
+---
+
+# 2026-07-31, third pass: the floor depends on the scene, and prominence does not discriminate
+
+The 7 px floor above -- which sets the whole sensitivity figure -- was measured
+against an isolated point on an empty background. `sim_cphd --help` says not to
+do that: correlation tracking "is biased by its own point response when the
+window is otherwise empty," and `--clutter` is "whenever the question is about
+the tracker rather than about focusing." The question here was about the
+tracker. Repeating it properly.
+
+## The floor, both ways
+
+Pulse route, 128 looks, zero overlap, 0.5 Hz, sweeping amplitude at 0.4 m cells.
+
+| px p2p | isolated point | vibrating clutter patch |
+|---|---|---|
+| 1 | 1.260 | 2.671 |
+| 2 | 1.260 | 2.369 |
+| 3 | 0.302 | 0.050 |
+| 4 | 0.302 | **0.504** |
+| 5 | 0.302 | **0.504** |
+| 6 | 0.302 | **0.504** |
+| 7 | **0.504** | **0.504** |
+| 10 | **0.504** | **0.504** |
+
+Injected 0.500 Hz. **Isolated 7 px, textured 4 px** -- a factor of 1.75. The
+sensitivity figure is scene-dependent by that factor: 68.7 mm at 0.1 Hz on Giza
+becomes about 39 mm over textured ground. Still centimetres.
+
+## A marginally open window is not an open window
+
+Lowering the constant to 4 px would give the uniform 159/0.88 configuration --
+ceiling 4.8 px -- a nominal 4.0-4.8 px window. Targets placed at 4.0, 4.4 and
+4.8 px inside it, with clutter, **all miss**, reporting the lowest one or two
+spectral bins. A ceiling has to clear the floor by a real margin; a ratio of 1.2
+does not, and 4.4 (the working configuration's) does. Where between those the
+boundary lies is not measured, and is not being guessed at. The validator keeps
+the conservative 7 px, which refuses this configuration for the right reason.
+
+## Prominence does not separate right answers from wrong ones
+
+Worth stating on its own, because it is a heuristic this project leans on:
+
+| case | reported | injected | prominence |
+|---|---|---|---|
+| isolated, 1 px | 1.260 | 0.500 | 8.8 |
+| isolated, 2 px | 1.260 | 0.500 | 9.6 |
+| textured, 4 px | **0.504** | 0.500 | **4.6** |
+| textured, 5 px | **0.504** | 0.500 | 6.3 |
+| uniform 0.88, 4 px | 0.105 | 0.500 | **27.7** |
+
+The correct answers carry prominence 4.6 and 6.3. The wrong ones carry 8.8, 9.6
+and 27.7. **Prominence is anti-correlated with correctness across this set.** It
+measures how cleanly a peak stands out, and a saturating argmax produces a very
+clean peak at the wrong frequency -- cleaner than a real signal near the floor.
+It cannot be used to decide whether a detection is real.

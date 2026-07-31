@@ -211,6 +211,33 @@ int main(void)
         RS_CHECK(strstr(a->detail, "would wrap") != NULL);
     }
 
+    /* A marginally open window is not a usable one. This configuration has a
+     * 4.8 px ceiling, which clears the 4 px floor a textured scene gives -- and
+     * targets placed at 4.0, 4.4 and 4.8 px inside that nominal window all
+     * missed. The conservative floor is what makes the validator say so. */
+    RS_CASE("a marginally open window is still refused");
+    {
+        rs_validate_req_t r;
+        rs_validate_req_default(&r);
+        r.dwell_s = 20.0;
+        r.lambda_m = 0.031228;
+        r.slant_range_m = 610328.0;
+        r.v_platform_ms = 7500.0;
+        r.incidence_rad = 34.99 * M_PI / 180.0;
+        r.n_pulse = 8000;
+        r.alpha = 1.0 / 19.96;     /* 159 looks at 0.88 overlap */
+        r.overlap = 0.88;
+        r.target_freq_hz = 0.5;
+        r.cell_m = 0.4;
+        r.upsample = 10;
+        r.grid_n = 320;
+
+        rs_validate(&r, f, &n);
+        const rs_validate_finding_t *a = find(f, n, RS_VALIDATE_AMBIGUITY);
+        RS_CHECK(a != NULL && a->level == RS_V_FAIL);
+        printf("    %s\n", a->detail);
+    }
+
     /* ------------------------------------------------------------------
      * Guards.
      * ------------------------------------------------------------------ */
