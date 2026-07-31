@@ -22,6 +22,20 @@ struct rs_grid;
 
 /* How the aperture is divided.
  *
+ * A NOTE ON THE NAMES. "master" and "slave" throughout this project are the
+ * wording of the sources it implements -- Biondi & Malanga and patent
+ * WO2024008365A1 -- and are kept so the code reads against them. Current SAR
+ * literature has moved to **reference** and **secondary** for the same two
+ * roles (ESA, ASF and the InSAR community generally), so a recent paper
+ * describing this same pairing will use those words instead. They are
+ * synonyms: master = reference, slave = secondary.
+ *
+ * Beware one collision when reading across: in THIS codebase "reference"
+ * already means something else -- rs_microm_params_t.reference and
+ * --reference first|pair|adjacent select which sub-look the tracker measures
+ * against, which is a different question from which image of a pair is held
+ * fixed. See rs_microm_reference_t in microm.h.
+ *
  * MASTER-SLAVE PAIRING -- THIS DEPARTS FROM THE SOURCES. The paper's Eqs. 4 and
  * 5 define two matrices, master and slave, each of N_D elements; Figure 7 draws
  * them as two rectangles offset by B_shift stepping across the azimuth band
