@@ -91,24 +91,11 @@ give that literature. **This implementation has not reproduced it**, and nothing
 be read as a demonstrated sensitivity. Measurements from the patent's own chain fail their
 null test outright.
 
-How far that goes is worth stating precisely, because it is stronger than "not yet
-validated". Every estimator this project implements has been swept over injected frequency
-on synthetic data with known ground truth, at operating points its own `validate` command
-admits, and scored by slope and rms rather than by a single match:
-
-| estimator, fixture | result |
-|---|---|
-| correlation, isolated point on an empty scene | **recovers** — slope 1.008, rms 0.0052 Hz |
-| correlation, coherently vibrating distributed texture | no; slope swings −2.2 to +2.3 across clutter seeds |
-| phase, isolated point | no; one fixed frequency for every injection, matched by a motionless scene |
-| phase, distributed texture | no |
-| the patent's master–slave pair | no; 0.5 Hz → 0.100, 1.0 Hz → 3.300 |
-
-So exactly one configuration recovers anything, and it is an isolated point target on an
-empty background — the easiest case that exists, and the furthest from a real structure.
-In several of the failures a *motionless* scene returns the same frequency as the moving one,
-at equal or higher prominence. [`docs/IMPLEMENTATION-VERIFICATION.md`](docs/IMPLEMENTATION-VERIFICATION.md)
-carries the numbers and the operating points.
+Tested against motion it was told to find, the software gets the frequency right in one case
+only: a single bright object on an otherwise empty scene. On more realistic ground, and with
+every other method it offers, it returns a frequency unrelated to the movement — often the
+same one it reports for a scene that is completely still.
+[`docs/IMPLEMENTATION-VERIFICATION.md`](docs/IMPLEMENTATION-VERIFICATION.md) has the numbers.
 
 **A wrong setting does not fail loudly.** This is the difficulty that shapes the whole
 project. Ask for a measurement the collect cannot support and you do not get an error or an
