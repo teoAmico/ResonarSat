@@ -293,18 +293,70 @@ stopped abruptly and lasted some tens of seconds", citing Massonnet and Vadon
 validate". Tens of seconds is the timescale of a long-dwell spotlight collect --
 Giza is 32.869 s.
 
-Open:
+### It does not cancel
 
-- Does a carrier drift *within* one dwell enter a single-pass sub-aperture
-  series, given that both sub-looks come from the same acquisition and share the
-  drift, or does the common term cancel?
-- If it does not cancel, a drift makes the phase-to-displacement scale vary
-  across the dwell. That would appear as a slowly varying apparent displacement
-  -- energy in the lowest spectral bins, which is where this implementation's
-  null results have repeatedly landed.
-- Is the drift observable in a CPHD's own metadata, or would it have to be
-  estimated from the data?
+A pulse sent at slow time `t` carries `f0 + df(t)`, so a target at range `R`
+returns phase `-4*pi*(f0+df(t))*R/c`. Comparing sub-look `m` against look 0:
 
-Nothing here asserts that this affects any run. It is listed because the
-mechanism is documented in the InSAR literature, is on the right timescale, and
-has not been ruled out.
+```
+dphi_m = -4*pi*R*[df(t_m) - df(t_0)] / c
+```
+
+Both looks come from one acquisition, but from different *instants* of it, and
+the observable is exactly the drift difference across the lag. The common part
+cancels; the part that accumulated between the two looks does not. As an
+apparent line-of-sight displacement, for drift rate `f'` over lag `dt`:
+
+```
+d = lambda * R * f' * dt / c  =  8.193e-5 * f'[Hz/s] * dt[s]   metres   (Giza)
+```
+
+| drift | dt = 0.1 s | dt = 1 s | dt = 10 s |
+|---|---|---|---|
+| 1 Hz/s | 0.008 mm | 0.082 mm | 0.82 mm |
+| 4 Hz/s | 0.033 mm | 0.328 mm | 3.28 mm |
+| 82 Hz/s | 0.672 mm | 6.72 mm | 67.2 mm |
+
+The phase CRLB floor at a 0.4 coherence is 0.329 mm per look, reached by a drift
+of **4.02 Hz/s at a one-second lag** -- a twentieth of the short-term rate Bähr
+reports. So the mechanism is not marginal at documented drift levels.
+
+A *constant* drift rate gives a linear phase ramp and is removed by the
+least-squares detrend in `rs_spectrum_compute()`. The dangerous case is the one
+Bähr actually describes -- drifts "that started and stopped abruptly" -- which
+leave a piecewise-linear residual that detrending does not remove and whose
+energy sits in the lowest bins.
+
+### It is not observable in this product's metadata
+
+The Giza CPHD's PVP block carries `SC0` (word 29), `FX1` (21) and `FX2` (22) per
+pulse. Read across all 335,149 vectors:
+
+```
+SC0  9.300000e9 Hz    min = max, spread 0.0000 Hz
+FX1  9.300000e9 Hz    min = max, spread 0.0000 Hz
+FX2  9.900000e9 Hz    min = max, spread 0.0000 Hz
+```
+
+Bit-identical, at exactly round values. That is a **declared nominal constant,
+not a measurement** -- no oscillator produces the same value 335,149 times. The
+fields are populated and carry no information about what the carrier actually
+did.
+
+(The PVP parse is verified against two independent quantities: `TxTime` spans
+32.8686 s against the documented 32.869 s dwell, and `FX2 - FX1` = 600 MHz gives
+`c/2B` = 0.2498 m range bins, the spacing `CLAUDE.md` records.)
+
+### Where that leaves it
+
+The mechanism is real, does not cancel, and is large enough at documented drift
+rates to dominate the phase floor. It cannot be checked from this collect's
+metadata, and estimating it from the data alone would mean separating a
+low-frequency phase trend from exactly the low-frequency signal the method is
+looking for -- which is the same separation problem the whole project keeps
+meeting.
+
+Bähr's remark that such errors "were neither expected nor are they easy to
+validate" is borne out here. Nothing asserts this affects any run; it is
+recorded as a mechanism that cannot currently be ruled out, and a reason not to
+read a low-bin peak as a measurement.
