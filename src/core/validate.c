@@ -111,6 +111,8 @@ void rs_validate_req_default(rs_validate_req_t *req)
     req->upsample = 40;
     req->cell_m = 1.0;
     req->grid_n = 512;
+    req->win = 32;
+    req->coherence_min = 0.40;   /* rs_microm_params_default() */
 }
 
 /* Run every check and write the findings. */
@@ -398,6 +400,99 @@ rs_validate_level_t rs_validate(const rs_validate_req_t *req,
               "sub-look resolution %.2f m over %.4f s gives a wrap ceiling of "
               "%.1f px p2p against a %.1f px artefact floor. %s",
               res_sap, t_sap, ceil_px, floor_px, verdict));
+    }
+
+    /* ---- can the coherence mask reject anything at all? -------------------
+     *
+     * rs_splitband_shift() estimates coherence as the mean magnitude over every
+     * pair of sub-looks. That is the standard estimator (ESA TM-19 Part C,
+     * Eq. 1.14) applied to a stack that repeat-pass interferometry never has:
+     * OVERLAPPING sub-apertures. Two looks whose bands overlap share spectral
+     * content by construction, so their pairwise coherence is high whatever the
+     * scene is doing -- for a white scene it is just the fraction of band they
+     * share, about 1 - d*(1-overlap) for looks d apart.
+     *
+     * Averaged over all pairs this gives a FLOOR the estimator cannot report
+     * below, and a mask set under that floor passes every window. TM-19's own
+     * bias term (Eq. 1.15, sqrt(pi/4N) at true zero) is the same phenomenon
+     * from sample count and is negligible here by comparison: at a 32x32 window
+     * it is 0.03, where band overlap at 0.99 gives 0.57.
+     *
+     * This is not hypothetical. runs/giza/2026-07-30-uniform-phase-khufu
+     * configuration A ran 128 looks at 0.99 overlap behind a 0.4 mask. Its
+     * floor is 0.574. The mask admitted everything it was given. */
+    if (req->alpha > 0.0 && req->overlap > 0.0 && req->overlap < 1.0) {
+        const double dn = (1.0 / req->alpha) - req->overlap;
+        const double nle = (dn > 0.0) ? dn / (1.0 - req->overlap) : 0.0;
+        const size_t nl = (nle > 1.0) ? (size_t)(nle + 0.5) : 0;
+        if (nl > 1) {
+        double tot = 0.0, cnt = 0.0, ov_pairs = 0.0, all_pairs = 0.0;
+        for (size_t d = 1; d < nl; d++) {
+            const double frac = 1.0 - (double)d * (1.0 - req->overlap);
+            const double wt = (double)(nl - d);
+            tot += wt * ((frac > 0.0) ? frac : 0.0);
+            cnt += wt;
+            all_pairs += wt;
+            if (frac > 0.0) ov_pairs += wt;
+        }
+        const double floor_g = (cnt > 0.0) ? tot / cnt : 0.0;
+        const rs_validate_level_t lvl =
+            (req->coherence_min <= 0.0)      ? RS_V_WARN
+          : (req->coherence_min <= floor_g)  ? RS_V_FAIL
+          : (req->coherence_min <= 1.5 * floor_g) ? RS_V_WARN : RS_V_PASS;
+        WORST(rs_v_add(out, &n, RS_VALIDATE_COHERENCE_GATE, lvl, "coherence gate",
+              "%.0f%% of look pairs share band, so an incoherent scene still "
+              "reports |g| = %.3f. The mask is %.2f. %s",
+              100.0 * (all_pairs > 0.0 ? ov_pairs / all_pairs : 0.0), floor_g,
+              req->coherence_min,
+              (req->coherence_min <= 0.0)
+                ? "Masking is off, so nothing is rejected by design."
+              : (req->coherence_min <= floor_g)
+                ? "The mask is AT OR BELOW that floor and therefore vacuous: it "
+                  "passes every window regardless of the scene."
+              : (req->coherence_min <= 1.5 * floor_g)
+                ? "Only just above the floor; it rejects little."
+                : "Clear of the floor."));
+        }
+    }
+
+    /* ---- the phase estimator's own noise floor ----------------------------
+     *
+     * The Cramer-Rao bound on interferometric phase (TM-19 Part C, Eq. 1.18;
+     * Part A, Eq. 2.9) is sigma_phi = sqrt(1-g^2)/(g*sqrt(2N)), giving a line-
+     * of-sight displacement noise of lambda*sigma_phi/(4*pi). This is the phase
+     * route's equivalent of the excursion floor RS_VALIDATE_AMBIGUITY reports
+     * for the correlation route, and it is roughly an order of magnitude
+     * smaller -- which is the reason to prefer the phase estimator, and the
+     * reason its null tests matter so much more.
+     *
+     * N is the number of INDEPENDENT samples in the window: cells only count
+     * once per sub-look resolution cell, and a grid finer than the sub-look
+     * merely oversamples. TM-19 notes the bound is reasonable only for N > 4,
+     * and that at N of 1 or 2 the phase dispersion is unusable at any SNR.
+     *
+     * THIS CHECK IS ONLY AS GOOD AS THE COHERENCE FED TO IT. The bound falls
+     * as coherence rises, so if RS_VALIDATE_COHERENCE_GATE reports that band
+     * overlap inflates the estimator, the floor printed here is optimistic by
+     * the same amount. Read the two together; they are not independent. */
+    if (req->win > 0 && req->cell_m > 0.0 && t_sap > 0.0
+        && req->coherence_min > 0.0 && req->lambda_m > 0.0) {
+        const double res_sap = req->lambda_m * req->slant_range_m
+                             / (2.0 * req->v_platform_ms * t_sap);
+        const double per_edge = (double)req->win * req->cell_m / res_sap;
+        const double n_ind = (per_edge < 1.0 ? 1.0 : per_edge) * (double)req->win;
+        const double g = req->coherence_min;
+        const double sphi = sqrt(1.0 - g * g) / (g * sqrt(2.0 * n_ind));
+        const double d_m = req->lambda_m * sphi / (4.0 * M_PI);
+        const rs_validate_level_t lvl = (n_ind <= 4.0) ? RS_V_WARN : RS_V_PASS;
+        WORST(rs_v_add(out, &n, RS_VALIDATE_PHASE_FLOOR, lvl, "phase floor",
+              "at the %.2f mask over %.0f independent samples the CRLB is "
+              "%.3f rad, a line-of-sight noise of %.4f mm per look.%s",
+              g, n_ind, sphi, 1000.0 * d_m,
+              (n_ind <= 4.0)
+                ? " Under 5 independent samples the bound does not hold and the"
+                  " phase dispersion is unusable at any SNR."
+                : ""));
     }
 
     /* ---- what reading it will cost --------------------------------------- */

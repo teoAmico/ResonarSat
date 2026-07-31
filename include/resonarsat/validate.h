@@ -56,6 +56,8 @@ typedef enum {
     RS_VALIDATE_PRF_STABILITY,    /* measured from the file's own pulse times */
     RS_VALIDATE_SENSITIVITY,      /* smallest displacement above the floor */
     RS_VALIDATE_AMBIGUITY,        /* is there any amplitude the tracker can see */
+    RS_VALIDATE_COHERENCE_GATE,   /* can the mask reject anything at all */
+    RS_VALIDATE_PHASE_FLOOR,      /* the phase estimator's noise floor, Eq 1.18 */
     RS_VALIDATE_MEMORY,           /* what a read of this collect will cost */
     RS_VALIDATE_GROUND_TRUTH,     /* always unknown; see the header */
     RS_VALIDATE_N_CHECKS
@@ -85,6 +87,12 @@ typedef struct {
     size_t upsample;
     double cell_m;
     size_t grid_n;       /* grid cells along track, for the spectral route */
+
+    /* The correlation/coherence window edge, in cells, and the coherence mask
+     * the run intends to apply. Both default to the pipeline's own defaults;
+     * set them to check a specific configuration. */
+    size_t win;
+    double coherence_min;
 } rs_validate_req_t;
 
 /* One check's verdict, with the number behind it. */

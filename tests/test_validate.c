@@ -298,6 +298,54 @@ int main(void)
         }
     }
 
+    /* The coherence mask configuration A actually ran behind. At 0.99 overlap
+     * almost every look pair shares band, so the estimator cannot report below
+     * 0.574 whatever the scene does -- and the mask was 0.4. */
+    RS_CASE("a coherence mask below its own floor is called vacuous");
+    {
+        rs_validate_req_t r;
+        giza(&r);
+        r.target_freq_hz = 0.05;
+        r.alpha = 1.0 / 2.27;        /* 128 looks at 0.99 overlap */
+        r.overlap = 0.99;
+        r.coherence_min = 0.4;
+        r.win = 32;
+        r.cell_m = 2.0;
+
+        rs_validate(&r, f, &n);
+        const rs_validate_finding_t *c = find(f, n, RS_VALIDATE_COHERENCE_GATE);
+        RS_CHECK(c != NULL && c->level == RS_V_FAIL);
+        RS_CHECK(strstr(c->detail, "vacuous") != NULL);
+        printf("    %s\n", c->detail);
+
+        /* Configuration B, same collect, 0.9 overlap over 2048 looks: only 1%
+         * of pairs share band, and the same 0.4 mask is meaningful. */
+        r.alpha = 1.0 / 205.7;
+        r.overlap = 0.9;
+        rs_validate(&r, f, &n);
+        c = find(f, n, RS_VALIDATE_COHERENCE_GATE);
+        RS_CHECK(c != NULL && c->level == RS_V_PASS);
+        printf("    %s\n", c->detail);
+    }
+
+    /* The phase route's floor, which is the reason to prefer it. */
+    RS_CASE("the phase floor is far below the correlation floor");
+    {
+        rs_validate_req_t r;
+        giza(&r);
+        r.target_freq_hz = 0.10;
+        r.alpha = 0.008;
+        r.overlap = 0.0;
+        r.coherence_min = 0.4;
+        r.win = 32;
+        r.cell_m = 1.0;
+
+        rs_validate(&r, f, &n);
+        const rs_validate_finding_t *p = find(f, n, RS_VALIDATE_PHASE_FLOOR);
+        RS_CHECK(p != NULL && p->level == RS_V_PASS);
+        printf("    %s\n", p->detail);
+    }
+
     /* ------------------------------------------------------------------
      * Guards.
      * ------------------------------------------------------------------ */

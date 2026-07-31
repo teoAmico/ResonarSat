@@ -647,3 +647,37 @@ B is inside its band at 0.324 Hz and is unaffected by this.
 
 `resonarsat validate` now computes the band from `t_sap`, and `mmotion` warns at
 run time when the peak it just printed came from beyond it.
+
+---
+
+# Amendment 2, 2026-07-31: configuration A's coherence mask was vacuous
+
+`rs_splitband_shift()` estimates coherence as the mean magnitude over every pair
+of sub-looks -- the standard estimator (ESA TM-19 Part C, Eq. 1.14) applied to a
+stack repeat-pass interferometry never has: **overlapping** sub-apertures. Two
+looks whose bands overlap share spectral content by construction, so their
+pairwise coherence is high whatever the scene does. For a white scene it is
+roughly the fraction of band they share, `1 - d*(1-overlap)` for looks `d` apart.
+
+Averaged over all pairs that is a floor the estimator cannot report below:
+
+| config | pairs sharing band | floor on an incoherent scene | mask used |
+|---|---|---|---|
+| A, N=128 ov=0.99 | 95% | **0.574** | 0.4 |
+| B, N=2048 ov=0.9 | 1% | 0.004 | 0.4 |
+
+**A's 0.4 mask sits below its own floor.** It passed every window it was given,
+regardless of the scene, and the `--coherence 0.4` in the command above did no
+filtering at all. B's identical mask is meaningful.
+
+This is the same phenomenon as TM-19's coherence bias (Part C, Eq. 1.15,
+`sqrt(pi/4N)` at true zero) but far larger and architecture-specific: the sample
+count contributes about 0.03 at a 32x32 window, where band overlap contributes
+0.57.
+
+It compounds with the band error in Amendment 1. A ran with a sub-aperture too
+long to carry any of the frequencies it reported, behind a mask that could not
+reject anything. Neither was visible in the output.
+
+`resonarsat validate` now computes this floor and calls a mask at or below it
+vacuous.
