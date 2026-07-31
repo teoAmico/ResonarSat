@@ -832,64 +832,131 @@ int main(void)
      * collect. rs_sim_scene() has no sub-resolution scatterer model, so that
      * regime is measured in rs_microm_estimator_t and not reproduced here.
      * ------------------------------------------------------------------ */
-    RS_CASE("the phase estimator recovers an injected frequency");
+    RS_CASE("the phase estimator does NOT recover the frequency either");
     {
-        /* Sized so the phase stays unambiguous, which is the regime this
-         * estimator is for. Amplitude 2.442 mm vertical projects to about
-         * 2.0 mm line-of-sight, giving a phase swing of 4*pi*A/lambda = 0.81
-         * rad -- comfortably inside +/-pi, so nothing folds and the
-         * non-accumulating estimator can see the whole motion. */
-        const double f_inject = 0.4;
-        const rs_sim_tgt_t tg[] = {
-            { .x = 0.0, .y = 0.0, .z = 0.0, .rcs = 1.0,
-              .vib_freq = f_inject, .vib_amp = 0.002442 }
-        };
+        /* A NEGATIVE RESULT, and a withdrawal.
+         *
+         * This case previously injected 0.4 Hz, recovered 0.407 Hz, and passed
+         * on |reported - injected| < 3 bins. That is the per-point criterion
+         * rs_track_fit() exists to replace, and it was wrong here for exactly
+         * the reason it was wrong four times before: 0.407 Hz is a FIXED
+         * artefact, and 0.4 Hz is where it happens to land.
+         *
+         * Swept instead of sampled, the chain reports 0.407 Hz for every
+         * injection from 0.2 to 0.7 Hz -- slope 0.000, six of six. A target
+         * with NO MOTION AT ALL reports the same 0.407 Hz at prominence 12.5,
+         * higher than any of the moving cases at 8.0-8.6, so prominence is
+         * anti-correlated with correctness here as it was for correlation.
+         * 0.407/0.0508 is bin 8 exactly.
+         *
+         * TWELVE OPERATING POINTS were scanned -- 32, 64, 128 and 256 looks at
+         * 0.00, 0.50 and 0.75 overlap. None tracks: the best slope is +0.266
+         * with 0.31 Hz rms, and in every one of the twelve the static control
+         * lands on the same frequency the moving cases report. The artefact's
+         * value moves with the configuration; it does not move with the scene.
+         *
+         * WHY THIS MATTERS MORE THAN THE OTHERS. Phase was the remaining hope.
+         * IMPLEMENTATION-VERIFICATION.md named test 3 the cheapest and most
+         * informative next step precisely because every recorded tracking
+         * failure was the CORRELATION estimator, and the phase route has a
+         * Cramer-Rao floor roughly 160x lower and had "barely been exercised".
+         * It has now been exercised. It does not track either, and the one
+         * data point that suggested it did was this test.
+         *
+         * NOT ELIMINATED, and worth stating so nobody re-runs the same scan:
+         * the fixture is an isolated point target on an empty scene, which
+         * microm.c warns is the case correlation scores badly on. Whether phase
+         * behaves differently on distributed texture is untested and is item 2
+         * of FOLLOW-UPS.md. That is a reason the scan is not the last word --
+         * it is not a reason to read the numbers below as anything but a
+         * negative. */
+        const double ph_freqs[] = { 0.2, 0.3, 0.4, 0.5, 0.6, 0.7 };
+        const size_t ph_n = sizeof ph_freqs / sizeof ph_freqs[0];
+        double ph_reported[sizeof ph_freqs / sizeof ph_freqs[0]];
+        double df = 0.0, static_dom = -1.0, mean_moving = 0.0;
 
-        rs_cphd_t c;
-        RS_CHECK_OK(rs_sim_scene(&c, tg, 1, 20.0, 400.0, 256, 0.5));
+        /* Amplitude held fixed across the sweep so the observable does not vary
+         * with it. 2.442 mm vertical projects to about 2.0 mm line-of-sight,
+         * a phase swing of 4*pi*A/lambda = 0.81 rad -- inside +/-pi, so nothing
+         * folds and the non-accumulating estimator can see the whole motion. */
+        for (size_t i = 0; i <= ph_n; i++) {
+            const int is_static = (i == ph_n);
+            const rs_sim_tgt_t tg[] = {
+                { .x = 0.0, .y = 0.0, .z = 0.0, .rcs = 1.0,
+                  .vib_freq = is_static ? 0.0 : ph_freqs[i],
+                  .vib_amp  = is_static ? 0.0 : 0.002442 }
+            };
 
-        rs_grid_t g = { .origin = {0,0,0}, .n_x = 48, .n_y = 48,
-                        .dx = 1.0, .dy = 1.0, .height = 0.0 };
-        rs_subap_params_t sp;
-        rs_subap_params_default(&sp);
-        sp.n_looks = 64;
-        sp.overlap = 0.5;
+            rs_cphd_t c;
+            RS_CHECK_OK(rs_sim_scene(&c, tg, 1, 20.0, 400.0, 256, 0.5));
 
-        rs_subap_stack_t s;
-        RS_CHECK_OK(rs_subaperture_from_cphd(&c, &g, &sp, &s));
+            rs_grid_t g = { .origin = {0,0,0}, .n_x = 48, .n_y = 48,
+                            .dx = 1.0, .dy = 1.0, .height = 0.0 };
+            rs_subap_params_t sp;
+            rs_subap_params_default(&sp);
+            sp.n_looks = 64;
+            sp.overlap = 0.5;
 
-        rs_microm_params_t mp;
-        rs_microm_params_default(&mp);
-        mp.estimator = RS_MICROM_EST_PHASE;
-        mp.win_az = mp.win_rg = 24;
-        mp.stride_az = mp.stride_rg = 8;
-        mp.coherence_min = 0.0;
+            rs_subap_stack_t s;
+            RS_CHECK_OK(rs_subaperture_from_cphd(&c, &g, &sp, &s));
 
-        rs_microm_t m;
-        RS_CHECK_OK(rs_microm_track(&s, &mp, &m));
+            rs_microm_params_t mp;
+            rs_microm_params_default(&mp);
+            mp.estimator = RS_MICROM_EST_PHASE;
+            mp.win_az = mp.win_rg = 24;
+            mp.stride_az = mp.stride_rg = 8;
+            mp.coherence_min = 0.0;
 
-        /* DISPLACEMENT, not velocity: phase measures displacement directly, and
-         * differencing it first multiplies every Fourier component by its own
-         * frequency. That is not a detail -- on real data it moved the reported
-         * peak from 0.5 Hz to 20.7 Hz. See rs_cmd_mmotion(). */
-        rs_spectrum_t spec;
-        RS_CHECK_OK(rs_spectrum_compute(&m, RS_SPEC_DISPLACEMENT, &spec));
+            rs_microm_t m;
+            RS_CHECK_OK(rs_microm_track(&s, &mp, &m));
 
-        size_t best = 0;
-        double prom = 0.0, dom = -1.0;
-        if (rs_spectrum_best_window(&spec, &best, &prom, NULL) == RS_OK) {
-            dom = spec.dominant_freq[best];
+            /* DISPLACEMENT, not velocity: phase measures displacement directly,
+             * and differencing it first multiplies every Fourier component by
+             * its own frequency. That is not a detail -- on real data it moved
+             * the reported peak from 0.5 Hz to 20.7 Hz. See rs_cmd_mmotion(). */
+            rs_spectrum_t spec;
+            RS_CHECK_OK(rs_spectrum_compute(&m, RS_SPEC_DISPLACEMENT, &spec));
+
+            size_t best = 0;
+            double prom = 0.0, dom = -1.0;
+            if (rs_spectrum_best_window(&spec, &best, &prom, NULL) == RS_OK) {
+                dom = spec.dominant_freq[best];
+            }
+            df = spec.df;
+            if (is_static) {
+                static_dom = dom;
+                printf("    STATIC (no motion)  -> %.3f Hz  prominence %.1f\n",
+                       dom, prom);
+            } else {
+                ph_reported[i] = dom;
+                mean_moving += dom / (double)ph_n;
+                printf("    injected %.2f Hz     -> %.3f Hz  prominence %.1f\n",
+                       ph_freqs[i], dom, prom);
+            }
+
+            rs_spectrum_free(&spec);
+            rs_microm_free(&m);
+            rs_subap_stack_free(&s);
+            rs_cphd_free(&c);
         }
-        printf("    injected %.2f Hz -> recovered %.3f Hz "
-               "(window %zu, prominence %.1f, bin %.4f Hz)\n",
-               f_inject, dom, best, prom, spec.df);
-        RS_CHECK(dom >= 0.0);
-        RS_CHECK_NEAR(dom, f_inject, 3.0 * spec.df);
 
-        rs_spectrum_free(&spec);
-        rs_microm_free(&m);
-        rs_subap_stack_free(&s);
-        rs_cphd_free(&c);
+        double slope = 0.0, rms = 0.0;
+        RS_CHECK(rs_track_fit(ph_freqs, ph_reported, ph_n, &slope, &rms) == 1);
+        printf("    slope %+.3f, rms %.4f Hz against a %.4f Hz bound "
+               "(bin %.4f Hz)\n", slope, rms, 0.5 * df, df);
+
+        /* The assertions lock in the negative, so that a change which makes the
+         * phase route work fails here and has to arrive with its evidence --
+         * the same guard the master-slave case carries. A tracking chain gives
+         * slope near 1 and rms under half a bin. */
+        RS_CHECK(fabs(slope) < 0.5);
+        RS_CHECK(rms > 0.5 * df);
+
+        /* And the artefact is the scene-independent part: motion or no motion,
+         * the same frequency comes back. This is the assertion that makes the
+         * case a negative rather than a poor recovery. */
+        RS_CHECK(static_dom >= 0.0);
+        RS_CHECK(fabs(static_dom - mean_moving) < 2.0 * df);
     }
 
     RS_CASE("phase displacement is bounded by lambda/4, i.e. does not accumulate");

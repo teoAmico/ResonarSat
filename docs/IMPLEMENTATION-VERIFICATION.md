@@ -448,7 +448,14 @@ static false-positive floor, with **slope 1.008 and rms 0.0052 Hz against a
 and rms 0.9945 Hz. The false second harmonics in the table above occur at the
 lower look counts, which the table marks as under-served.
 
-The synthetic phase case recovered 0.40 Hz as 0.407 Hz.
+The synthetic phase case appeared to recover 0.40 Hz as 0.407 Hz. **That is
+withdrawn.** Swept rather than sampled, the phase estimator reports 0.407 Hz for
+every injection from 0.2 to 0.7 Hz -- slope 0.000, rms 0.1762 Hz against a
+0.0254 Hz bound -- and a target with no motion at all reports the same 0.407 Hz
+at a HIGHER prominence, 12.5 against 8.0-10.8. It is bin 8 exactly. The single
+point passed only because the fixed artefact happens to sit near 0.4 Hz, which
+is the fifth instance of the failure `rs_track_fit()` was written to catch.
+`test_tracking.c` now records it as a negative.
 
 The patent master/slave pair did not recover its injected frequencies:
 
@@ -473,6 +480,7 @@ of reproduction.
 | `--patent-exact` implements Eqs. 21–24 literally as rendered | Not by default; Eq. 22's `2πt` is available only through experimental `--eq22-literal-t`, while Eq. 22–23 dimensions remain repaired |
 | The code implements Eqs. 1–20 as executable models | No; several are background derivations and the spring model is not fitted |
 | The patent pair recovers known synthetic vibration | No, at the tested operating points |
+| The phase estimator recovers known synthetic vibration | No, at twelve operating points; a static scene returns the same frequency |
 | Eq. 22–24 recover known synthetic physical depth from SAR motion | Not demonstrated by the current simulator; existing depth fixtures construct `Y` from the inversion model itself |
 | Independent papers validate the surface micro-motion stage | Yes |
 | Independent papers validate single-pass subsurface tomography | No evidence found |
@@ -535,14 +543,31 @@ Pardini et al. independently use the same `exp(j*kappa_z*z)` convention
    elevation targets. This validates the steering/inversion machinery separately
    from the acoustic hypothesis.
 
-**Status at 2026-07-31: all six remain open.**
+**Status at 2026-07-31: test 3 is executed and returns a negative; the other
+five remain open.**
 
-Test 3 is the cheapest and is the recommended next. Every tracking failure
-recorded on 2026-07-31 is the *correlation* estimator; the phase route has a
-Cramér–Rao floor roughly 160x lower and has barely been exercised. Running
-`rs_track_fit()` over frequency and seed on the phase estimator would establish
-whether the difficulty is correlation-specific, and either outcome bounds the
-capability question more than further correlation sweeps would.
+**Test 3, executed.** The phase estimator was swept over frequency and scanned
+over twelve operating points -- 32, 64, 128 and 256 looks at 0.00, 0.50 and 0.75
+overlap. **None tracks.** The best slope is +0.266 with 0.31 Hz rms, and in every
+one of the twelve the static control lands on the same frequency the moving cases
+report: the artefact's value moves with the configuration and not with the scene.
+So the phase route fails the same way the correlation route does, and the
+reasoning below -- which made test 3 the recommended next step -- has been
+answered rather than deferred:
+
+> Test 3 is the cheapest and is the recommended next. Every tracking failure
+> recorded on 2026-07-31 is the *correlation* estimator; the phase route has a
+> Cramér–Rao floor roughly 160x lower and has barely been exercised. Running
+> `rs_track_fit()` over frequency and seed on the phase estimator would establish
+> whether the difficulty is correlation-specific, and either outcome bounds the
+> capability question more than further correlation sweeps would.
+
+The difficulty is **not** correlation-specific. What remains untested is whether
+either estimator behaves differently on distributed texture: the fixture is an
+isolated point on an empty scene, which `microm.c` warns is the case correlation
+scores badly on, and which is item 2 of `FOLLOW-UPS.md`. That is a reason the
+scan is not the last word. It is not a reason to read the result as anything but
+a negative.
 
 Test 1 is blocked externally rather than by effort: `docs/DATASETS.md` records
 that no corner-reflector collect with synchronous ground truth exists in any
