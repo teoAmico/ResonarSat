@@ -681,3 +681,64 @@ series gives slope 0.000 and rms 0.9945 Hz.
 **Every result in this file that was later withdrawn fails the new criterion,
 and the one operating point that survives passes it comfortably.** Future
 sweeps should report slope and rms rather than a count of per-point matches.
+
+---
+
+# Overlap isolated, and a fifth withdrawal
+
+Overlap was the one factor worth testing before the full four-factor sweep: the
+failing 0.88 configuration beats the working one on sub-look resolution and on
+independent-sample count, so theory favours it, and it fails anyway. If overlap
+alone accounts for that, most of the sweep is unnecessary.
+
+It isolates cleanly. Holding `denom = n - (n-1)*overlap` fixed pins `t_sap`, and
+with it the sub-look resolution, the observable band and the ambiguity ceiling.
+Only the number and spacing of looks then changes:
+
+| overlap | n_looks | denom | t_sap | dt |
+|---|---|---|---|---|
+| 0.00 | 128 | 128 | 0.1562 s | 0.1562 s |
+| 0.50 | 255 | 128 | 0.1562 s | 0.0781 s |
+| 0.75 | 509 | 128 | 0.1562 s | 0.0391 s |
+
+Excursion held at 10 px p2p, frequency swept 0.3 to 1.1 Hz, scored with
+`rs_track_fit()`:
+
+| overlap | slope | rms (Hz) | verdict |
+|---|---|---|---|
+| 0.00 | -0.050 | 0.4696 | does not track (0.050 reported at 1.1 Hz) |
+| 0.50 | **+1.004** | **0.0030** | tracks, 5 of 5 |
+| 0.75 | +0.955 | 0.0359 | does not track (one bin low at 0.5 and 0.9 Hz) |
+
+Read alone this says 0.5 overlap is markedly better than zero -- which would
+contradict `rs_microm_reference_t`'s stated reasoning and the project's default.
+
+## It does not survive replication
+
+The zero-overlap verdict rests entirely on one anomaly at 1.1 Hz. Repeating that
+point over three clutter realisations, with 0.5 overlap on the identical scenes:
+
+| seed | overlap 0.00 | overlap 0.50 |
+|---|---|---|
+| 7 | 0.050 miss | 1.104 ok |
+| 11 | 1.100 ok | 1.104 ok |
+| 23 | 1.150 ok | **6.275 miss** |
+
+Both fail on some realisations. Zero overlap's failure is seed-specific, and
+0.5 overlap -- which scored slope 1.004 and rms 0.0030 on seed 7 -- reports
+6.275 Hz against an injected 1.1 Hz on seed 23. **The overlap finding is
+withdrawn; nothing here establishes an ordering between them.**
+
+## What that means for the criterion
+
+`rs_track_fit()` was added earlier today precisely to stop single-point matches
+producing false conclusions, and it did: every earlier withdrawal fails it. But
+it sweeps FREQUENCY and not SPECKLE, and a five-point sweep on one realisation
+still passed a configuration that fails on another.
+
+The criterion's documentation now says so. A passing slope and rms establish
+that a chain tracked *on that scene*; a claim about a *configuration* needs the
+sweep repeated over independent `--seed` realisations and the verdicts pooled.
+
+The four-factor experiment therefore has a fifth dimension, and it is not
+optional: **realisation**. Any arm evaluated on one seed can say nothing.

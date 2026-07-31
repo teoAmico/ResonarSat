@@ -93,6 +93,19 @@ static const char *rs_test_current = "";
  *
  * Neither alone is sufficient. Slope 1 with a large offset still tracks but is
  * biased; a small rms with slope 0 means the sweep was too narrow to tell.
+ *
+ * AND NEITHER IS SUFFICIENT ON ONE SCENE REALISATION. This criterion sweeps
+ * frequency; it does not sweep the speckle. Measured on 2026-07-31: at 1.1 Hz
+ * with everything else held fixed, zero overlap missed on one clutter seed and
+ * recovered on two others, while 0.5 overlap recovered on two and reported
+ * 6.275 Hz on the third. A five-frequency sweep on a single seed gave slope
+ * 1.004 and rms 0.0030 Hz -- a clean pass -- for a configuration that fails
+ * outright on a different realisation of the same scene.
+ *
+ * So a passing slope and rms establish that a chain tracked ON THAT SCENE.
+ * Concluding anything about a CONFIGURATION needs the sweep repeated over
+ * independent realisations (sim_cphd --seed) and the verdicts pooled. Single
+ * realisations are how this project drew five wrong conclusions in one day.
  * Returns 0 and leaves the outputs at 0 when n < 3, since two points always
  * fit a line exactly and can never fail this. */
 static inline int rs_track_fit(const double *injected, const double *reported,
