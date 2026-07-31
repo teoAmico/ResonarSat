@@ -481,6 +481,7 @@ of reproduction.
 | The code implements Eqs. 1–20 as executable models | No; several are background derivations and the spring model is not fitted |
 | The patent pair recovers known synthetic vibration | No, at the tested operating points |
 | The phase estimator recovers known synthetic vibration | No, at twelve operating points; a static scene returns the same frequency |
+| Either estimator recovers known synthetic vibration on distributed texture | No; slope swings sign across clutter seeds and static controls match the moving reports |
 | Eq. 22–24 recover known synthetic physical depth from SAR motion | Not demonstrated by the current simulator; existing depth fixtures construct `Y` from the inversion model itself |
 | Independent papers validate the surface micro-motion stage | Yes |
 | Independent papers validate single-pass subsurface tomography | No evidence found |
@@ -562,12 +563,33 @@ answered rather than deferred:
 > whether the difficulty is correlation-specific, and either outcome bounds the
 > capability question more than further correlation sweeps would.
 
-The difficulty is **not** correlation-specific. What remains untested is whether
-either estimator behaves differently on distributed texture: the fixture is an
-isolated point on an empty scene, which `microm.c` warns is the case correlation
-scores badly on, and which is item 2 of `FOLLOW-UPS.md`. That is a reason the
-scan is not the last word. It is not a reason to read the result as anything but
-a negative.
+The difficulty is **not** correlation-specific.
+
+**Nor is it a fixture artefact.** The remaining explanation was distributed
+texture -- the fixtures above are isolated points on empty scenes, which
+`microm.c` warns is the case correlation scores badly on. Swept on
+`sim_cphd --clutter-vib`, where 400 Rayleigh scatterers vibrate coherently so the
+patch moves as a whole, **neither estimator tracks either**. Five frequencies
+from 0.3 to 1.1 Hz at a constant 10 px displacement, three clutter seeds, each
+with a static control on the identical clutter:
+
+| estimator | slope by seed | rms (Hz) |
+|---|---|---|
+| correlation | -2.217, +2.344, +1.487 | 0.79-1.29 |
+| phase | -0.252, +0.000, -1.135 | 1.10-1.30 |
+
+A tracking chain gives slope near 1 and rms under half a bin, which is 0.025 Hz
+here. Correlation's slope swings sign across seeds; phase on one seed returns a
+fixed 1.764 Hz for every injection. Every static control falls inside the spread
+of the moving reports, and doubling the displacement changes nothing. The
+operating point was admissible on this project's own arithmetic -- 10 px sits
+mid-window between a 4 px textured floor and a 24.8 px ambiguity ceiling, well
+inside a 3.23 Hz band at an observation ratio of 0.33.
+
+**So the synthetic evidence for the tracker rests on exactly one configuration:**
+correlation, an isolated point target, an empty scene, 128 looks and zero
+overlap. That is the easiest case that exists and the furthest from a real
+structure. Full numbers in item 2 of `FOLLOW-UPS.md`.
 
 Test 1 is blocked externally rather than by effort: `docs/DATASETS.md` records
 that no corner-reflector collect with synchronous ground truth exists in any
