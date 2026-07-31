@@ -69,7 +69,13 @@ depth cube
 ```
 
 `docs/ARCHITECTURE.md` carries the full version. Subcommands: `feasibility`, `info`, `focus`,
-`mmotion`, `tomo`, `sweep`.
+`mmotion`, `tomo`, `sweep`, `validate`.
+
+`validate` runs before the pipeline and answers whether a collect can support the measurement
+you intend — thirteen arithmetic checks on the geometry, costing milliseconds. Every check is
+necessary and none is sufficient; the ground-truth line always reports UNKNOWN. Its thresholds
+are pinned by `tests/test_validate.c` against configurations whose outcome is already known
+from a run, so changing one fails the suite and demands the evidence.
 
 Nothing outside `src/core/fft.c` may include or name PocketFFT — see `include/resonarsat/fft.h`.
 

@@ -249,9 +249,13 @@ Reading the output:
 `--n` is the number of frames and `--overlap` how much consecutive frames share.
 Together they set both the frequency reach and the sharpness of each frame.
 
-High overlap raises the sampling rate — and therefore the frequency reach —
-without shortening each frame, so resolution is preserved. But **overlap is the
-second thing to choose, not the first.**
+High overlap raises the sampling rate without shortening each frame. It does
+**not** raise the frequency reach: each frame averages the motion over its own
+length, so the band stops at `1/(2 × frame length)` however finely the frames are
+spaced. Overlap buys a finer look at the same band, not a wider one — quoting the
+step's Nyquist instead overstates the reach by `1/(1 − overlap)`, which is a
+factor of 100 at 99% overlap. To reach higher, shorten the frame. And **overlap
+is the second thing to choose, not the first.**
 
 **Set the frame length first.** The quantity that decides whether anything tracks
 at all is the *aperture fraction*: the length of one frame divided by the whole
