@@ -239,3 +239,102 @@ decide a peak is real would pass it.
 Note also that the excursion equals the window width at every size tried, which
 is what a correlation argmax does when no peak dominates: the reported shift is
 bounded only by the search extent.
+
+---
+
+# 2026-07-31: the observation-ratio threshold, attempted and withdrawn
+
+The section above localised the failure to the observation ratio `eta = f*t_sap`
+and left the threshold as a bracket between two data points. This is the attempt
+to measure it, and what it found instead.
+
+## Design
+
+Hold the modulation index `B` fixed at 1.648 -- 5 mm, the amplitude
+`tests/test_pairedecho.c` verifies -- so the ghost train's *structure* is
+constant, and vary only frequency. Then `eta = f*t_sap` is the sole variable.
+N=159, overlap 0.88, `t_sap` 1.0020 s, `dt` 0.1202 s, `df` 0.0523 Hz, cell 0.4 m,
+size 320, win 32, upsample 10. Analysis restricted to the four windows containing
+the target. "RECOVERED" means the reported dominant frequency is within two bins
+of the injected one.
+
+## The ladder
+
+| f (Hz) | eta | uniform reports | pulse reports |
+|---|---|---|---|
+| 0.2 | 0.200 | 1.569 | 0.314 |
+| 0.3 | 0.301 | 1.569 | 0.314 *(within 2 bins)* |
+| 0.4 | 0.401 | 1.569 | 0.314 *(within 2 bins)* |
+| 0.5 | 0.501 | 1.046 | 0.314 |
+| 0.7 | 0.701 | 1.569 | 0.314 |
+| 1.0 | 1.002 | 1.569 | 0.367 |
+| 1.4 | 1.403 | 0.105 | 0.314 |
+
+**The reported frequency barely depends on the injected one.** The uniform route
+answers 1.569 Hz at five of seven; the pulse route answers 0.314 Hz at six of
+seven. The two apparent recoveries are that fixed value landing within tolerance
+of the target -- 0.314 is within two bins of both 0.3 and 0.4 -- and are
+coincidences, not detections.
+
+## The static control
+
+Run the identical chain on a target with no vibration at all:
+
+| configuration | reports | prominence |
+|---|---|---|
+| pulse N=128 overlap 0 | 1.260 Hz | 10.3 |
+| pulse N=159 overlap 0.88 | 0.157 Hz | 13.0 |
+| **uniform N=159 overlap 0.88** | **1.569 Hz** | **27.9** |
+
+The uniform route returns **the same 1.569 Hz, at the highest prominence in the
+whole experiment, from a scene containing no motion.** It is a processing
+artefact, and it is what the ladder above was reading at every frequency.
+
+## Why the eta threshold is not measurable this way
+
+The known-working shape -- pulse, N=128, zero overlap, `t_sap` 0.156 s -- was run
+on the same collects and grid:
+
+| f (Hz) | eta | p-p displacement | reports | |
+|---|---|---|---|---|
+| 0.2 | 0.031 | 2.1 px | 0.302 | miss |
+| 0.3 | 0.047 | 3.1 px | 0.302 | coincidence |
+| 0.5 | 0.078 | 5.2 px | 0.302 | miss |
+| 0.7 | 0.109 | 7.3 px | **0.706** | recovered |
+| 1.0 | 0.156 | 10.5 px | **1.008** | recovered |
+| 1.4 | 0.219 | 14.7 px | **1.411** | recovered |
+
+This shape does track the injected frequency, but only once the displacement
+exceeds roughly 7 px peak-to-peak -- below that its own artefact at ~0.302 Hz
+wins. So within this configuration the discriminator is **displacement**, not
+`eta`.
+
+And the two configurations do not overlap in `eta` at all: 0.031-0.219 against
+0.200-1.403. They meet only at `eta ~ 0.2`, where 128/0 recovers (14.7 px) and
+159/0.88 misses (2.1 px) -- a comparison confounded by a factor of seven in
+displacement.
+
+The confound is structural, not an oversight in the design. Displacement goes as
+`f*A`, the modulation index `B` as `A`, and `eta` as `f*t_sap`. Fixing any two
+determines the third. Matching `eta` and displacement across two values of
+`t_sap` forces `B` to differ by a factor of six, which changes the ghost train
+being tracked. **These three cannot be separated by varying the target.**
+
+## What stands and what does not
+
+Stands: the paired-echo train exists and sits where theory puts it
+(`tests/test_pairedecho.c`); `eta = f*t_sap` is exactly the ratio of ghost
+spacing to sub-look resolution; `eta` grows with dwell.
+
+Does not: that `eta ~ 0.5` is where the tracker breaks, and that `eta` is what
+defeated the Khufu run. Both were inferred from the confounded comparison above.
+`RS_ETA_BAD` was demoted from FAIL to WARN in `src/core/validate.c` accordingly,
+and the README's "nothing above about 0.12 Hz is reachable" was withdrawn.
+
+## The finding that displaced it
+
+A fixed spurious frequency, configuration-dependent and present with no motion in
+the scene, at prominence exceeding anything the real signal produces. Separating
+`eta` from displacement needs a target-independent handle -- varying `t_sap` at
+fixed `f` and `A`, which moves `eta` alone -- but that is not worth running until
+the artefact is understood, because it is what both routes are reporting.

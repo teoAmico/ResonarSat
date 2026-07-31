@@ -101,13 +101,14 @@ walk over. The measurement is in
 **Two different limits are easy to confuse.** The step between sub-apertures sets how finely
 in time the ground is sampled, and so the highest frequency representable at all; each
 sub-aperture's own length sets how strongly a frequency survives. Overlapping separates the
-two. But the sub-aperture length has an upper bound as well, and it is the one that bites:
-past an observation ratio of about 0.5 the sub-look *resolves* the target's own micro-Doppler
-paired echoes, the tracked feature fragments and correlation tracking fails at any amplitude.
-Since the observation ratio is `f · α · dwell`, **a long dwell is a liability here, not an
-asset** — on the 32.9 s Giza collect, at the aperture fraction the published validation uses,
-nothing above about 0.12 Hz is reachable. `resonarsat validate` computes this for a given
-collect and target before anything is processed.
+two. But the sub-aperture length has an upper bound as well. Once the observation ratio
+`f · t_sap` passes 1, the sub-look *resolves* the target's own micro-Doppler paired echoes and
+the tracker follows a train rather than a point. The echoes are real and sit where the theory
+puts them — `tests/test_pairedecho.c` finds them at the predicted offsets and amplitudes — and
+since the ratio is `f · α · dwell`, **a long dwell is a liability here, not an asset.** Where
+it becomes fatal in practice is not measured: an attempt to bracket it failed because the
+observation ratio, the injected displacement and the modulation index cannot be varied
+independently. `resonarsat validate` reports the ratio as a warning, not a refusal.
 
 
 Three limits worth knowing before choosing a target:

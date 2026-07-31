@@ -9,20 +9,32 @@
 #include <string.h>
 
 /* The observation ratio at which the sub-look begins to resolve the target's
- * paired-echo train, measured rather than assumed.
+ * paired-echo train.
  *
- * A vibrating target images as a train of echoes spaced f*lambda*R/(2*v_p), and
- * a sub-look resolves them when that exceeds its own azimuth resolution
- * lambda*R/(2*v_p*t_sap). The ratio of the two is exactly f*t_sap -- the
- * observation ratio. Past it the tracked feature fragments into comparably
- * bright spots and the correlation argmax hops between them.
+ * THE MECHANISM IS REAL; THE THRESHOLD IS NOT YET MEASURED. A vibrating target
+ * images as a train of echoes spaced f*lambda*R/(2*v_p) -- confirmed directly by
+ * tests/test_pairedecho.c, which finds them at the predicted offsets with the
+ * predicted Bessel amplitudes -- and a sub-look resolves that train when the
+ * spacing exceeds its own azimuth resolution lambda*R/(2*v_p*t_sap). The ratio
+ * of the two is exactly f*t_sap, the observation ratio. That much is arithmetic.
  *
- * The bracket is from measurement: eta 0.078 and 0.141 recover an injected
- * frequency, eta 0.501 fails at any amplitude. Between 0.14 and 0.50 is
- * unmeasured, so WARN spans it rather than either bound being asserted.
- * Vattulainen et al. operate at 0.39-0.69 and report performance degrading
- * across that range, which is consistent with the upper bound being real and
- * with 0.5 being roughly where it bites. */
+ * What is NOT established is where the tracker actually breaks. The bracket
+ * below was inferred by comparing a configuration that recovered an injected
+ * frequency against one that did not, and those two differ in more than eta:
+ * route, look count, overlap, sub-aperture length, injected displacement and
+ * the modulation index B all move together, and eta, displacement and B cannot
+ * be varied independently at all -- displacement goes as f*A and B as A, while
+ * eta goes as f*t_sap.
+ *
+ * A ladder run afterwards found something worse. The uniform spectral-split
+ * route reports 1.569 Hz at prominence 27.9 on a target that is not moving at
+ * all, and reports the same 1.569 Hz for every injected frequency from 0.2 to
+ * 1.4 Hz. A fixed spurious line of that strength swamps the comparison the
+ * bracket came from, so the numbers below describe an expectation from physics
+ * rather than a measured boundary.
+ *
+ * They are therefore a WARNING and not a refusal. See
+ * runs/giza/2026-07-30-validated-spot-khufu/POSITIVE-CONTROL.md. */
 #define RS_ETA_GOOD 0.20
 #define RS_ETA_BAD  0.50
 
@@ -155,8 +167,11 @@ rs_validate_level_t rs_validate(const rs_validate_req_t *req,
     /* ---- the observation ratio, which is the ghost-resolution limit ------- */
     if (f > 0.0) {
         const double eta = f * t_sap;
+        /* WARN rather than FAIL at both bounds: the mechanism is established
+         * but the threshold is not, and a check that refuses a configuration
+         * on an unmeasured boundary would be doing what this whole command
+         * exists to prevent. */
         const rs_validate_level_t lvl = (eta <= RS_ETA_GOOD) ? RS_V_PASS
-                                      : (eta >= RS_ETA_BAD)  ? RS_V_FAIL
                                                              : RS_V_WARN;
         const double f_ok = (t_sap > 0.0) ? RS_ETA_GOOD / t_sap : 0.0;
         WORST(rs_v_add(out, &n, RS_VALIDATE_OBSERVATION_RATIO, lvl,
@@ -167,11 +182,10 @@ rs_validate_level_t rs_validate(const rs_validate_req_t *req,
               t_sap, f, eta,
               (lvl == RS_V_PASS)
                 ? "The sub-look does not resolve the target's paired echoes."
-                : (lvl == RS_V_WARN)
-                ? "Between the measured working range and the measured failure; "
-                  "untested here and where the published validation sits."
-                : "The sub-look RESOLVES the paired echoes, the tracked feature "
-                  "fragments, and correlation tracking fails at any amplitude.",
+                : "The sub-look RESOLVES the target's own paired echoes, so what "
+                  "the tracker follows is a train rather than a point. Expect "
+                  "degradation; where it becomes fatal is NOT measured, and the "
+                  "published validation operates at 0.39-0.69.",
               RS_ETA_GOOD, f_ok));
     }
 

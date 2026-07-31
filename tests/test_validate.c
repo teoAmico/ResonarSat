@@ -48,7 +48,7 @@ int main(void)
      * used. It produced a complete, plausible result and was later shown to
      * be incapable of the measurement. The validator must refuse it.
      * ------------------------------------------------------------------ */
-    RS_CASE("the Khufu configuration is refused, for the reason it failed");
+    RS_CASE("the Khufu configuration is flagged on the observation ratio");
     {
         rs_validate_req_t r;
         giza(&r);
@@ -60,10 +60,12 @@ int main(void)
         r.cell_m = 1.0;
         r.grid_n = 512;
 
-        const rs_validate_level_t worst = rs_validate(&r, f, &n);
+        rs_validate(&r, f, &n);
         const rs_validate_finding_t *eta = find(f, n, RS_VALIDATE_OBSERVATION_RATIO);
-        RS_CHECK(worst == RS_V_FAIL);
-        RS_CHECK(eta != NULL && eta->level == RS_V_FAIL);
+        /* WARN, not FAIL: the ghost-resolution mechanism is confirmed by
+         * tests/test_pairedecho.c, but the threshold at which the tracker
+         * actually breaks is not measured -- see rs_validate()'s comment. */
+        RS_CHECK(eta != NULL && eta->level == RS_V_WARN);
         printf("    eta check: %s\n", eta ? eta->detail : "(missing)");
 
         /* And the aperture fraction, which the run was corrected TO, passes --
