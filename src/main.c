@@ -1466,7 +1466,8 @@ static int rs_cmd_mmotion(int argc, char **argv)
                 fprintf(sf, "# reference=%s b_shift_hz=%.12g pair_lag_s=%.12g "
                             "dt_s=%.12g looks=%zu\n",
                         (mp.reference == RS_MICROM_REF_PAIR) ? "pair" :
-                        (mp.reference == RS_MICROM_REF_ADJACENT) ? "adjacent" : "first",
+                        (mp.reference == RS_MICROM_REF_ADJACENT) ? "adjacent" :
+                        (mp.reference == RS_MICROM_REF_LAG)      ? "lag"      : "first",
                         stack.b_shift_hz, stack.pair_lag_s, stack.dt, stack.n_looks);
                 /* disp_los and phase are written too, because without them this
                  * file cannot describe a phase run at all: that estimator
@@ -1624,6 +1625,59 @@ static int rs_cmd_mmotion(int argc, char **argv)
            n_cand, spec.n_win,
            (spec.quant_px > 0.0) ? " and quantisation floor"
                                  : "; the floor does not apply to this estimator");
+
+    /* What the windows AGREE on, beside what the most prominent one said. The
+     * two answer different questions and can differ: measured on a 3.000 Hz
+     * injection, 23 of 49 windows made 2.995 Hz their top bin while the single
+     * most prominent window reported 2.604 Hz. A fragmented vote looks like a
+     * motionless scene, which is the uncertainty a single window's argmax
+     * cannot express. */
+    double cons_hz = 0.0;
+    size_t cons_agree = 0, cons_distinct = 0, cons_vote = 0, cons_block = 0;
+    double qmax_rep = 0.0;
+    for (size_t w = 0; w < spec.n_win; w++) {
+        if (spec.quality[w] > qmax_rep) qmax_rep = spec.quality[w];
+    }
+    {
+        double cf = 0.0;
+        size_t n_agree = 0, n_distinct = 0, n_vote = 0, n_block = 0;
+        if (rs_spectrum_consensus(&spec, &cf, &n_agree, &n_distinct, &n_vote,
+                                  &n_block) == RS_OK && n_vote > 0) {
+            cons_hz = cf; cons_agree = n_agree; cons_distinct = n_distinct;
+            cons_vote = n_vote; cons_block = n_block;
+            printf("  consensus: %.3f Hz, agreed by %zu of %zu voting windows "
+                   "(%.0f%%), %zu distinct answers, largest contiguous block %zu\n",
+                   cf, n_agree, n_vote, 100.0 * (double)n_agree / (double)n_vote,
+                   n_distinct, n_block);
+            /* The geometric bound, not a tuned one: overlapping windows put a
+             * resolvable target in a 2x2 block at minimum, so a largest block
+             * below four cannot be a spatially resolved mode. */
+            if (n_block > 0 && n_block < 4) {
+                printf("  WARNING: the agreeing windows are SCATTERED (largest "
+                       "block %zu < 4).\n"
+                       "           Windows overlap at the tracking stride, so a "
+                       "resolvable mode\n"
+                       "           occupies a 2x2 block at minimum. This is the "
+                       "shape of coincidence.\n", n_block);
+            }
+            /* One third, on the agreement share rather than the distinct
+             * count -- the share separated the measured cases cleanly where the
+             * count did not. Synthetic fixtures with known ground truth put
+             * correct recoveries at 47-61% and everything wrong, including
+             * motionless scenes, at 14-29%.
+             *
+             * THE EVIDENCE UNDER THIS CONSTANT IS THIN: three correct
+             * detections, one seed, one fixture family. It warns rather than
+             * gates for that reason, and rs_spectrum_consensus() applies no
+             * threshold at all so a caller is never silently bound by it. */
+            if ((double)n_agree < (1.0 / 3.0) * (double)n_vote) {
+                printf("  WARNING: the windows do not agree. A vote this "
+                       "fragmented is what a\n"
+                       "           MOTIONLESS scene produces, whatever the "
+                       "prominence above says.\n");
+            }
+        }
+    }
     if (spec.quant_px > 0.0 && n_cand > 0 && n_cand < 4) {
         printf("  WARNING: windows overlap at the tracking stride, so a target\n"
                "           large enough to resolve falls in a 2x2 block of them\n"
@@ -1744,7 +1798,53 @@ static int rs_cmd_mmotion(int argc, char **argv)
         snprintf(path, sizeof path, "%s_quality.png", prefix);
         rs_raster_write_map(spec.quality, spec.n_win_az, spec.n_win_rg,
                             path, 0.0, 1.0, RS_PALETTE_VIRIDIS);
-        printf("wrote %s_freq.png and %s_quality.png\n", prefix, prefix);
+
+        /* The per-window evidence the selection was made FROM, not just the
+         * selection.
+         *
+         * Every result this project has recorded kept the answer and discarded
+         * what produced it, so a later question about the selection policy --
+         * and there has been one -- cannot be asked of a finished run without
+         * reprocessing the collect. That is why the Giza runs cannot now be
+         * re-read to see whether their nulls were nulls or scattered noise.
+         *
+         * This costs one small text file per run and changes no reported
+         * number. It is the cheapest thing here and the only one whose value
+         * does not depend on any threshold being right. */
+        snprintf(path, sizeof path, "%s_windows.csv", prefix);
+        FILE *wf = fopen(path, "w");
+        if (!wf) {
+            fprintf(stderr, "warning: cannot write %s\n", path);
+        } else {
+            const double q_min_rep = 0.5 * qmax_rep;
+            const double floor_rep = (spec.quant_px > 0.0)
+                                   ? 2.449 * spec.quant_px : 0.0;
+            fprintf(wf, "# per-window evidence behind the reported selection\n");
+            fprintf(wf, "# consensus_hz=%.12g agree=%zu voting=%zu distinct=%zu "
+                        "largest_block=%zu\n",
+                    cons_hz, cons_agree, cons_vote, cons_distinct, cons_block);
+            fprintf(wf, "# df_hz=%.12g quant_px=%.12g coherence_gate=%.12g "
+                        "floor_px=%.12g n_win_az=%zu n_win_rg=%zu\n",
+                    spec.df, spec.quant_px, q_min_rep, floor_rep,
+                    spec.n_win_az, spec.n_win_rg);
+            fprintf(wf, "window,iaz,irg,dominant_hz,prominence,quality,"
+                        "excursion_px,passed_gates,agrees_with_consensus\n");
+            for (size_t w = 0; w < spec.n_win; w++) {
+                const double exc = spec.excursion_px ? spec.excursion_px[w] : 0.0;
+                const int passed = (spec.quality[w] >= q_min_rep) &&
+                                   (floor_rep <= 0.0 || !spec.excursion_px ||
+                                    exc >= floor_rep);
+                const int agrees = passed && spec.df > 0.0 &&
+                    fabs(spec.dominant_freq[w] - cons_hz) <= 0.5 * spec.df;
+                fprintf(wf, "%zu,%zu,%zu,%.12g,%.12g,%.12g,%.12g,%d,%d\n",
+                        w, w / spec.n_win_rg, w % spec.n_win_rg,
+                        spec.dominant_freq[w], spec.prominence[w],
+                        spec.quality[w], exc, passed, agrees);
+            }
+            fclose(wf);
+        }
+        printf("wrote %s_freq.png, %s_quality.png and %s_windows.csv\n",
+               prefix, prefix, prefix);
     }
 
     rs_spectrum_free(&spec);
@@ -2204,6 +2304,7 @@ static int rs_cmd_tomo(int argc, char **argv)
     tp.no_optimize = no_optimize;
     const char *ref_name = (mp.reference == RS_MICROM_REF_PAIR) ? "pair" :
                            (mp.reference == RS_MICROM_REF_ADJACENT) ? "adjacent" :
+                           (mp.reference == RS_MICROM_REF_LAG) ? "lag" :
                            "first";
     snprintf(tp.provenance, sizeof tp.provenance,
              "subap=%s estimator=%s looks=%zu overlap=%.3f win=%zux%zu "

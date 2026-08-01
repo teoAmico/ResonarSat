@@ -285,6 +285,139 @@ resonarsat_status_t rs_spectrum_best_window(const rs_spectrum_t *spec,
     if (out_prominence) *out_prominence = spec->prominence[best];
     return RS_OK;
 }
+/* The frequency the most windows agree on. See microm.h. */
+resonarsat_status_t rs_spectrum_consensus(const rs_spectrum_t *spec,
+                                          double *out_freq,
+                                          size_t *out_n_agree,
+                                          size_t *out_n_distinct,
+                                          size_t *out_n_voting,
+                                          size_t *out_n_contiguous)
+{
+    if (out_freq)         *out_freq = 0.0;
+    if (out_n_agree)      *out_n_agree = 0;
+    if (out_n_distinct)   *out_n_distinct = 0;
+    if (out_n_voting)     *out_n_voting = 0;
+    if (out_n_contiguous) *out_n_contiguous = 0;
+    if (!spec || !spec->prominence || !spec->quality || !spec->dominant_freq ||
+        spec->n_win == 0)
+        return RS_ERR_ARG;
+
+    /* The same two gates rs_spectrum_best_window() applies, so that the counts
+     * the two functions return describe one population. Duplicated rather than
+     * factored out because the gates are the contract here, not an
+     * implementation detail: a change to one that silently changed the other
+     * would make the counts incomparable without anything saying so. */
+    double q_max = 0.0;
+    for (size_t w = 0; w < spec->n_win; w++) {
+        if (spec->quality[w] > q_max) q_max = spec->quality[w];
+    }
+    const double q_min = 0.5 * q_max;
+    const double floor_px = (spec->quant_px > 0.0) ? 2.449 * spec->quant_px : 0.0;
+
+    /* Half a bin, so two windows agree exactly when they picked the same bin.
+     * Falls back to an absolute tolerance if the axis carries no spacing. */
+    const double tol = (spec->df > 0.0) ? 0.5 * spec->df : 1e-9;
+
+    size_t n_vote = 0, best_count = 0, n_distinct = 0;
+    double best_freq = 0.0;
+
+    for (size_t w = 0; w < spec->n_win; w++) {
+        if (spec->quality[w] < q_min) continue;
+        if (floor_px > 0.0 && spec->excursion_px &&
+            spec->excursion_px[w] < floor_px) continue;
+        n_vote++;
+
+        /* Count how many gated windows share this one's bin. O(n_win^2), which
+         * is nothing beside the tracking that produced the spectrum: n_win is
+         * tens to low thousands and each comparison is a subtraction. */
+        size_t count = 0;
+        int seen_earlier = 0;
+        for (size_t v = 0; v < spec->n_win; v++) {
+            if (spec->quality[v] < q_min) continue;
+            if (floor_px > 0.0 && spec->excursion_px &&
+                spec->excursion_px[v] < floor_px) continue;
+            if (fabs(spec->dominant_freq[v] - spec->dominant_freq[w]) <= tol) {
+                count++;
+                /* Distinct values are counted once, at their first occurrence. */
+                if (v < w) seen_earlier = 1;
+            }
+        }
+        if (!seen_earlier) n_distinct++;
+
+        /* Ties go to the lower frequency, which is arbitrary but fixed: an
+         * unstable choice would make the count meaningful and the frequency
+         * beside it not. */
+        if (count > best_count ||
+            (count == best_count && best_count > 0 &&
+             spec->dominant_freq[w] < best_freq)) {
+            best_count = count;
+            best_freq  = spec->dominant_freq[w];
+        }
+    }
+
+    if (out_n_voting)   *out_n_voting = n_vote;
+    if (out_n_distinct) *out_n_distinct = n_distinct;
+
+    if (n_vote == 0) {
+        rs_set_error("spectrum: no window passed the coherence gate and the "
+                     "quantisation floor, so there is nothing to take a "
+                     "consensus over");
+        return RS_ERR_RANGE;
+    }
+
+    if (out_freq)    *out_freq = best_freq;
+    if (out_n_agree) *out_n_agree = best_count;
+
+    /* Largest 4-connected block of agreeing windows on the window grid.
+     *
+     * Iterative flood fill with an explicit stack rather than recursion: n_win
+     * runs to thousands and a scattered agreement set would otherwise recurse
+     * as deep as it is large. Allocation failure leaves the count at zero and
+     * the rest of the answer intact, since contiguity refines the result rather
+     * than constituting it. */
+    if (out_n_contiguous && spec->n_win_az > 0 && spec->n_win_rg > 0 &&
+        spec->n_win_az * spec->n_win_rg == spec->n_win) {
+        unsigned char *mark = calloc(spec->n_win, 1);
+        size_t *stack = malloc(spec->n_win * sizeof *stack);
+        if (mark && stack) {
+            for (size_t w = 0; w < spec->n_win; w++) {
+                if (spec->quality[w] < q_min) continue;
+                if (floor_px > 0.0 && spec->excursion_px &&
+                    spec->excursion_px[w] < floor_px) continue;
+                if (fabs(spec->dominant_freq[w] - best_freq) <= tol) mark[w] = 1;
+            }
+            size_t largest = 0;
+            for (size_t seed = 0; seed < spec->n_win; seed++) {
+                if (mark[seed] != 1) continue;
+                size_t top = 0, size = 0;
+                stack[top++] = seed; mark[seed] = 2;
+                while (top > 0) {
+                    const size_t c = stack[--top];
+                    size++;
+                    const size_t ia = c / spec->n_win_rg;
+                    const size_t ir = c % spec->n_win_rg;
+                    /* four neighbours on the window lattice */
+                    const long da[4] = { -1, 1, 0, 0 };
+                    const long dr[4] = { 0, 0, -1, 1 };
+                    for (int k = 0; k < 4; k++) {
+                        const long na = (long)ia + da[k];
+                        const long nr = (long)ir + dr[k];
+                        if (na < 0 || nr < 0 ||
+                            (size_t)na >= spec->n_win_az ||
+                            (size_t)nr >= spec->n_win_rg) continue;
+                        const size_t nb = (size_t)na * spec->n_win_rg + (size_t)nr;
+                        if (mark[nb] == 1) { mark[nb] = 2; stack[top++] = nb; }
+                    }
+                }
+                if (size > largest) largest = size;
+            }
+            *out_n_contiguous = largest;
+        }
+        free(mark); free(stack);
+    }
+    return RS_OK;
+}
+
 
 /* Observation ratio for a measured frequency. See the header on why this is a
  * diagnostic quantity and not a validity threshold. */

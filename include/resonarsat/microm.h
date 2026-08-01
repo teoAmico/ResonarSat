@@ -751,6 +751,65 @@ resonarsat_status_t rs_spectrum_best_window(const rs_spectrum_t *spec,
                                             double *out_prominence,
                                             size_t *out_n_candidates);
 
+/* The frequency the most windows agree on, and how many agree.
+ *
+ * rs_spectrum_best_window() answers "which single window is most prominent";
+ * this answers "what do the windows agree on", which is a different question and
+ * the one a detection needs. A window can clear every gate and still report a
+ * frequency no other window reports -- measured on a 3.000 Hz injection, 23 of
+ * 49 windows made 2.995 Hz their top bin while 16 made 2.604 Hz theirs, and the
+ * single most prominent window was one of the sixteen.
+ *
+ * Windows agree when their dominant frequencies fall in the same bin, tested at
+ * half a bin. Only windows passing the SAME gates as rs_spectrum_best_window()
+ * vote, so the two functions describe the same population and their counts are
+ * comparable.
+ *
+ * 'out_n_agree' and 'out_n_distinct' ARE THE ANSWER, not diagnostics. The
+ * measured behaviour on synthetic fixtures with known ground truth:
+ *
+ *     agreement      distinct winners     outcome
+ *     47-61%         5-11                 3 of 3 recovered the injection
+ *     14-24%         15-28                mostly wrong
+ *     static scene   19-27                no motion present
+ *
+ * A fragmented vote and a motionless scene look alike, which is the property
+ * this file has otherwise lacked: a single window's argmax is equally confident
+ * whether or not anything moved, and that is why prominence turned out to be
+ * anti-correlated with correctness. Nineteen distinct winners over 49 windows
+ * should read as "no consensus" however prominent the leader is.
+ *
+ * NOT A THRESHOLD, and deliberately no threshold is applied here. The 40%
+ * boundary above rests on three correct detections from one seed and one fixture
+ * family; it is far too little to hard-code, and a caller that wants to gate on
+ * it should do so where the choice is visible. Returning the counts and letting
+ * the caller decide is the honest interim, exactly as reporting
+ * 'out_n_candidates' is for the function above.
+ *
+ * 'out_n_contiguous' IS WHERE THE AGREEING WINDOWS ARE, not merely how many.
+ * It is the size of the largest 4-connected block of agreeing windows on the
+ * window grid, and it separates a mode from a coincidence in a way the count
+ * alone cannot: twenty-three windows scattered across the scene and
+ * twenty-three forming a patch are the same number and not the same evidence.
+ * A vibrating structure occupies contiguous ground; chance crossings do not.
+ *
+ * There is a non-arbitrary floor for it, and it is the one
+ * rs_spectrum_best_window()'s header already derives for the candidate count.
+ * Windows are laid at a stride of typically half their width, so they overlap
+ * and a target large enough to be resolved at all falls inside a 2x2 block at
+ * minimum. A largest block below four therefore cannot describe a spatially
+ * resolved mode whatever the agreement percentage says. That bound comes from
+ * the window geometry rather than from a tuned constant.
+ *
+ * Returns RS_ERR_RANGE when no window passes the gates, matching
+ * rs_spectrum_best_window(), and RS_ERR_ARG on a NULL or empty spectrum. */
+resonarsat_status_t rs_spectrum_consensus(const rs_spectrum_t *spec,
+                                          double *out_freq,
+                                          size_t *out_n_agree,
+                                          size_t *out_n_distinct,
+                                          size_t *out_n_voting,
+                                          size_t *out_n_contiguous);
+
 /* Return the observation ratio implied by a sub-aperture duration and a measured
  * frequency: t_sap divided by that frequency's period, i.e. how many cycles of
  * the motion each sub-look integrates over.
