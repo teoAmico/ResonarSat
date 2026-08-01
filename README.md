@@ -55,6 +55,38 @@ software processing non-public COSMO-SkyMed data, and no independent reimplement
 existed to check it against. ResonarSat implements the method as described in the published
 paper and patent, so the technique itself can be tested.
 
+## Does it replicate Giza?
+
+Two different questions hide in that one, and they have different answers.
+
+**Replicating the method: largely done.** The published chain is implemented.
+`--patent-exact` runs the patent's operator sequence, the readers work on three vendors'
+data, backprojection focuses, and the sub-aperture stage builds the stack. Where the sources
+are ambiguous the choices are exposed rather than silently picked. That part succeeded, and
+it is why the specification problems could be found at all — `B_shift` having no stated
+value, the sweep geometry nulling every resolvable bin, and the paper and patent differing by
+a factor of two on the depth scale.
+
+**Replicating the result: no, at four independent levels.**
+
+- **The instrument does not work.** No estimator recovers a known injected frequency at
+  operating points the project's own arithmetic admits. Whatever feeds the depth stage is
+  unvalidated.
+- **The collect probably could not support it anyway.** The measured amplitude floor is
+  centimetres at the frequencies of interest; a pyramid's ambient response is orders of
+  magnitude below that. That is geometry, not code, and no configuration argues with it.
+- **The depth step is unvalidated independently of both.** Its axis is set by an assumed
+  seismic velocity and an assumed 22 kHz "investigation frequency" that no spaceborne SAR can
+  sample and that nothing in the pipeline measures.
+- **The original cannot be checked directly** — proprietary software, non-public
+  COSMO-SkyMed data, and no independent reimplementation before this one.
+
+**None of that is evidence that the Giza claim is wrong.** A failed replication with a
+demonstrably broken instrument tells you about the instrument. This project cannot presently
+distinguish "there is nothing there" from "our chain does not work", and reading its nulls as
+a refutation would be the same error, in the opposite direction, as reading its peaks as a
+detection.
+
 ## Scope
 
 - **Language:** C11, for the throughput this problem needs — the profile is dominated by
