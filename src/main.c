@@ -1580,9 +1580,47 @@ static int rs_cmd_mmotion(int argc, char **argv)
         pp = hi - lo;
     }
 
-    printf("strongest peak in window %zu: %.3f Hz, prominence %.1f, "
-           "quality %.3f, peak-to-peak velocity %.1f mm/s\n",
-           best, spec.dominant_freq[best], prom, spec.quality[best], pp * 1e3);
+    double cons_hz = 0.0;
+    size_t cons_agree = 0, cons_distinct = 0, cons_vote = 0, cons_block = 0;
+    double qmax_rep = 0.0;
+    for (size_t w = 0; w < spec.n_win; w++) {
+        if (spec.quality[w] > qmax_rep) qmax_rep = spec.quality[w];
+    }
+    (void)rs_spectrum_consensus(&spec, &cons_hz, &cons_agree, &cons_distinct,
+                                &cons_vote, &cons_block);
+
+    /* THE GATE. Refuse to report a frequency when the agreeing windows cannot
+     * form a resolvable mode.
+     *
+     * On the geometric bound alone -- windows overlap at half their width, so a
+     * target large enough to resolve occupies a 2x2 block at minimum, and a
+     * largest block under four is the shape of coincidence rather than of a
+     * structure. That bound comes from the window layout, not from a constant
+     * anyone chose, which is why it gates while the agreement percentage below
+     * only warns.
+     *
+     * Refusing rather than reporting-with-a-caveat follows the precedent
+     * rs_spectrum_best_window() set one stage down, where falling back to
+     * window zero was replaced by an error: an absent measurement and a wrong
+     * one are not the same answer. Everything needed to second-guess this is in
+     * PREFIX_windows.csv. */
+    const int gated = (cons_vote > 0 && cons_block > 0 && cons_block < 4);
+
+    if (gated) {
+        printf("NO FREQUENCY REPORTED: the windows agreeing on %.3f Hz form a "
+               "largest contiguous\n"
+               "  block of %zu, below the 4 that a spatially resolved mode "
+               "requires.\n"
+               "  Diagnostics only, NOT a measurement -- strongest window %zu: "
+               "%.3f Hz, prominence %.1f,\n"
+               "  quality %.3f, peak-to-peak velocity %.1f mm/s\n",
+               cons_hz, cons_block, best, spec.dominant_freq[best], prom,
+               spec.quality[best], pp * 1e3);
+    } else {
+        printf("strongest peak in window %zu: %.3f Hz, prominence %.1f, "
+               "quality %.3f, peak-to-peak velocity %.1f mm/s\n",
+               best, spec.dominant_freq[best], prom, spec.quality[best], pp * 1e3);
+    }
 
     /* Is the winner even inside the band the sub-apertures can carry?
      *
@@ -1632,19 +1670,11 @@ static int rs_cmd_mmotion(int argc, char **argv)
      * most prominent window reported 2.604 Hz. A fragmented vote looks like a
      * motionless scene, which is the uncertainty a single window's argmax
      * cannot express. */
-    double cons_hz = 0.0;
-    size_t cons_agree = 0, cons_distinct = 0, cons_vote = 0, cons_block = 0;
-    double qmax_rep = 0.0;
-    for (size_t w = 0; w < spec.n_win; w++) {
-        if (spec.quality[w] > qmax_rep) qmax_rep = spec.quality[w];
-    }
     {
-        double cf = 0.0;
-        size_t n_agree = 0, n_distinct = 0, n_vote = 0, n_block = 0;
-        if (rs_spectrum_consensus(&spec, &cf, &n_agree, &n_distinct, &n_vote,
-                                  &n_block) == RS_OK && n_vote > 0) {
-            cons_hz = cf; cons_agree = n_agree; cons_distinct = n_distinct;
-            cons_vote = n_vote; cons_block = n_block;
+        const double cf = cons_hz;
+        const size_t n_agree = cons_agree, n_distinct = cons_distinct;
+        const size_t n_vote = cons_vote, n_block = cons_block;
+        if (n_vote > 0) {
             printf("  consensus: %.3f Hz, agreed by %zu of %zu voting windows "
                    "(%.0f%%), %zu distinct answers, largest contiguous block %zu\n",
                    cf, n_agree, n_vote, 100.0 * (double)n_agree / (double)n_vote,
