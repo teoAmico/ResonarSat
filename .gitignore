@@ -51,6 +51,7 @@ docs/*
 !docs/IMPLEMENTATION-VERIFICATION.md
 !docs/OPEN-QUESTIONS.md
 !docs/CORE-QUESTIONS.md
+!docs/FOLLOW-UPS.md
 
 # Synthetic fixtures written into the working tree by the simulator tools.
 sim.cphd.truth
