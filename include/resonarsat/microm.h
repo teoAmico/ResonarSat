@@ -779,6 +779,21 @@ resonarsat_status_t rs_spectrum_best_window(const rs_spectrum_t *spec,
  * anti-correlated with correctness. Nineteen distinct winners over 49 windows
  * should read as "no consensus" however prominent the leader is.
  *
+ * THAT HOLDS FOR SCENE-DRIVEN NOISE ONLY, AND THE EXCEPTION MATTERS. Agreement
+ * detects noise that is INDEPENDENT across windows. An artefact produced by the
+ * processing rather than by the scene appears identically in every window, so
+ * the windows agree about it unanimously and this statistic reports its highest
+ * possible confidence. Measured: the phase estimator returns 0.407 Hz for every
+ * injection from 0.2 to 0.7 Hz AND for a motionless scene, with 9 of 9 windows
+ * agreeing in all seven cases. No threshold helps, because 100% is the ceiling.
+ *
+ * The only check that sees a common-mode artefact is a null control -- the same
+ * processing over a scene known to be motionless, compared -- because such an
+ * artefact is by definition identical whether or not anything moved. That is
+ * rs_null_static() and mmotion's --null-static. This function does not replace
+ * it and must not be presented as doing so: a run wants both, agreement for
+ * scattered noise and a null control for coherent noise.
+ *
  * NOT A THRESHOLD, and deliberately no threshold is applied here. The 40%
  * boundary above rests on three correct detections from one seed and one fixture
  * family; it is far too little to hard-code, and a caller that wants to gate on
