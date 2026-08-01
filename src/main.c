@@ -1589,33 +1589,49 @@ static int rs_cmd_mmotion(int argc, char **argv)
     (void)rs_spectrum_consensus(&spec, &cons_hz, &cons_agree, &cons_distinct,
                                 &cons_vote, &cons_block);
 
-    /* THE GATE. Refuse to report a frequency when the agreeing windows cannot
-     * form a resolvable mode.
+    /* THE GATE. Refuse to report a frequency when the windows do not agree.
      *
-     * On the geometric bound alone -- windows overlap at half their width, so a
-     * target large enough to resolve occupies a 2x2 block at minimum, and a
-     * largest block under four is the shape of coincidence rather than of a
-     * structure. That bound comes from the window layout, not from a constant
-     * anyone chose, which is why it gates while the agreement percentage below
-     * only warns.
+     * AN EARLIER VERSION GATED ON CONTIGUITY INSTEAD, and it was wrong. The
+     * argument was that a largest 4-connected block under four cannot be a
+     * spatially resolved mode, since overlapping windows put a resolvable
+     * target in a 2x2 block at minimum -- a bound from the window layout rather
+     * than a constant anyone chose. That provenance is real and it does not
+     * survive contact with the data: at the documented working operating point
+     * the consensus returned 0.302, 0.504 and 0.706 Hz against injections of
+     * 0.3, 0.5 and 0.7 Hz, with 75%, 80% and 67% of windows agreeing, and a
+     * largest block of 3 refused all three. Windows drop out of the vote for
+     * other reasons -- the coherence gate, the quantisation floor -- so three
+     * contiguous agreeing windows is exactly what a 2x2 block looks like when
+     * one corner is excluded.
+     *
+     * Agreement separates the measured cases and contiguity does not. Correct
+     * recoveries run 47-80%; motionless scenes and wrong answers run 11-16%,
+     * with no overlap across the eight cases measured. So the gate is the
+     * statistic that discriminates, not the one with the better-sounding
+     * derivation, and the contiguity figure is reported beside it.
+     *
+     * THE THRESHOLD IS TUNED and its evidence is thin -- eight cases, one
+     * fixture family, two seeds. It is one third because that is where the two
+     * populations separate with room on either side, not because anything
+     * derives it.
      *
      * Refusing rather than reporting-with-a-caveat follows the precedent
      * rs_spectrum_best_window() set one stage down, where falling back to
      * window zero was replaced by an error: an absent measurement and a wrong
      * one are not the same answer. Everything needed to second-guess this is in
      * PREFIX_windows.csv. */
-    const int gated = (cons_vote > 0 && cons_block > 0 && cons_block < 4);
+    const int gated = (cons_vote > 0 &&
+                       (double)cons_agree < (1.0 / 3.0) * (double)cons_vote);
 
     if (gated) {
-        printf("NO FREQUENCY REPORTED: the windows agreeing on %.3f Hz form a "
-               "largest contiguous\n"
-               "  block of %zu, below the 4 that a spatially resolved mode "
-               "requires.\n"
-               "  Diagnostics only, NOT a measurement -- strongest window %zu: "
-               "%.3f Hz, prominence %.1f,\n"
-               "  quality %.3f, peak-to-peak velocity %.1f mm/s\n",
-               cons_hz, cons_block, best, spec.dominant_freq[best], prom,
-               spec.quality[best], pp * 1e3);
+        printf("NO FREQUENCY REPORTED: only %zu of %zu windows agree (%.0f%%), "
+               "which is what a\n"
+               "  MOTIONLESS scene produces. Diagnostics only, NOT a "
+               "measurement -- strongest\n"
+               "  window %zu: %.3f Hz, prominence %.1f, quality %.3f, "
+               "peak-to-peak velocity %.1f mm/s\n",
+               cons_agree, cons_vote, 100.0 * (double)cons_agree / (double)cons_vote,
+               best, spec.dominant_freq[best], prom, spec.quality[best], pp * 1e3);
     } else {
         printf("strongest peak in window %zu: %.3f Hz, prominence %.1f, "
                "quality %.3f, peak-to-peak velocity %.1f mm/s\n",
@@ -1700,12 +1716,8 @@ static int rs_cmd_mmotion(int argc, char **argv)
              * detections, one seed, one fixture family. It warns rather than
              * gates for that reason, and rs_spectrum_consensus() applies no
              * threshold at all so a caller is never silently bound by it. */
-            if ((double)n_agree < (1.0 / 3.0) * (double)n_vote) {
-                printf("  WARNING: the windows do not agree. A vote this "
-                       "fragmented is what a\n"
-                       "           MOTIONLESS scene produces, whatever the "
-                       "prominence above says.\n");
-            }
+            /* The agreement gate above already refused this case; nothing
+             * further to warn about here. */
         }
     }
     if (spec.quant_px > 0.0 && n_cand > 0 && n_cand < 4) {
