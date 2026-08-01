@@ -81,8 +81,7 @@ a factor of two on the depth scale.
 - **The original cannot be checked directly** — proprietary software, non-public
   COSMO-SkyMed data, and no independent reimplementation before this one.
 
-**None of that is evidence that the Giza claim is wrong.** A failed replication with a
-demonstrably broken instrument tells you about the instrument. This project cannot presently
+**None of that is evidence that the Giza claim is wrong.** This project cannot presently
 distinguish "there is nothing there" from "our chain does not work", and reading its nulls as
 a refutation would be the same error, in the opposite direction, as reading its peaks as a
 detection.
